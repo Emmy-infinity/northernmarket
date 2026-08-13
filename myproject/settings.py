@@ -1,26 +1,25 @@
 import os
 from pathlib import Path
 from datetime import timedelta
+import sys
 import dj_database_url
 from dotenv import load_dotenv
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
-import sys
-
-
-
+# Load environment keys
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
+# Security Parameters
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
-
-# SECURITY WARNING: don't run with debug turned on in production!
-#DEBUG = os.getenv("DEBUG", "False") == "True"
-DEBUG =True
+DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
+# REST Framework Ecosystem
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -35,36 +34,29 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
 }
 
-# Cloudinary Configuration
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
-
-# Open your local project ──> myproject/settings.py
-
-#
-
-
+# 🌟 INSTALLED APPLICATIONS (COMPLIANT OVERRIDES)
 INSTALLED_APPS = [
-    'unfold', # 🌟 PLACED FIRST TO OVERRIDE THE ADMIN UI
-    'unfold.contrib.filters', # Optional modern filter cards
-    'cloudinary_storage',
+    'unfold',                  # Placed first to override administrative layout templates
+    'unfold.contrib.filters',  # Modern filtering modules
+    'cloudinary_storage',      # Asset pipeline hook (loads before contrib.admin)
     "django.contrib.admin",
-    'cloudinary',
+    'cloudinary',              # Core layout package tracking
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "corsheaders",
-    "myapp",
     "rest_framework",
+    
+    # 🌟 TARGET CHOSEN SINGLE APP ROUTE ENTRY ONLY:
+    "myapp.apps.MyappConfig",  # Forces Django to execute emergency SQL syncs!
 ]
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware', # Processes compressed static admin styles
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -113,45 +105,27 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# Static & Media Files
-
-
-
-
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-
-
-# Static & Media Files Configuration
+# Static & Media Base URL Mappings
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Add these two lines to fix the crash:
+# 🌟 MEDIA FILES DISPATCH SYSTEM
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-STATICFILES_STORAGE = 'cloudinary_storage.storage.StaticCloudinaryStorage'
 
+# 🌟 STATIC FILES DISPATCH SYSTEM (WhiteNoise handles compilation caching cleanly)
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
-# CORS Settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    # Add your live frontend Render URL here once deployed, e.g.:
-    # "https://your-frontend-app.onrender.com"
-]
-
-# Open your local project ──> myproject/settings.py
-
-import os
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
-
-# 1. Feed the credentials directly to the core Cloudinary package (Fixes CloudinaryField)
+# Cloudinary Framework Authentication
 cloudinary.config(
     cloud_name = 'dtll1o9u0',
     api_key = '387833656525477',
@@ -159,21 +133,18 @@ cloudinary.config(
     secure = True
 )
 
-# 2. Feed the credentials to the django-cloudinary-storage wrapper (Fixes Media Routing)
 CLOUDINARY_STORAGE = {
     'CLOUD_NAME': 'dtll1o9u0',
     'API_KEY': '387833656525477',
     'API_SECRET': 'AmTSvrVHKiLlN2ArzFgctGx_-70'
 }
 
-# Bind the media storage drivers
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-
-
-# Enables compression and aggressive caching for fast loading speeds
-STORAGES = {
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
-}
+# CORS Gateway Whitelist Origins
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
