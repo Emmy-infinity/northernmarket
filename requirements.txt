@@ -1,5 +1,5 @@
 # Clear out open-ended definitions and use this locked layout:
-Django>=5.0,<5.1
+Django==5.1.5
 django-unfold==0.45.0
 djangorestframework==3.15.2
 cloudinary==1.45.0
