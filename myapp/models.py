@@ -1,0 +1,103 @@
+import sys
+from django.db import models
+from django.contrib.auth import get_user_model
+from cloudinary.models import CloudinaryField
+from django.utils import timezone
+
+User = get_user_model()
+
+class Product(models.Model):
+    CONDITION_CHOICES = [
+        ('NEW', 'Brand New / Sealed'),
+        ('REFURB', 'Refurbished / Tested'),
+        ('USED', 'Used / Working'),
+        ('SCRAP', 'Scrap / For Spare Parts'),
+    ]
+    
+    LOCATION_CHOICES = [
+        ('GULU', 'Gulu City'),
+        ('LIRA', 'Lira City'),
+        ('KLA', 'Kampala Road / Hub'),
+        ('ARUA', 'Arua City'),
+    ]
+
+    seller = models.ForeignKey(User, on_delete=models.CASCADE, related_name='products')
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    
+    # Financials & Inventory
+    price = models.DecimalField(max_digits=12, decimal_places=2) # Supports millions of UGX safely
+    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED')
+    stock_count = models.PositiveIntegerField(default=1)
+    
+    # Logistics
+    item_location = models.CharField(max_length=10, choices=LOCATION_CHOICES, default='GULU')
+    seller_location_details = models.CharField(max_length=255, help_text="e.g., Near Gulu University Main Gate")
+    
+    # 🌟 RESTORED TIMESTAMPS
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # 🌟 B2B PREMIUM RANKING FIELDS
+    is_featured = models.BooleanField(default=False, db_index=True)
+    featured_until = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    def save(self, *args, **kwargs):
+        # Auto-expire the premium ranking if the duration lapses past today
+        if self.featured_until and self.featured_until < timezone.now():
+            self.is_featured = False
+            self.featured_until = None
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.title} - {self.price:,} UGX"
+
+
+class Photo(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='photos', null=True, blank=True)
+    image = CloudinaryField('image')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PaymentTransaction(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending Payment Prompt'),
+        ('SUCCESSFUL', 'Payment Captured Securely'),
+        ('FAILED', 'Transaction Declined'),
+    ]
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='payments')
+    amount = models.DecimalField(max_digits=10, decimal_places=2) 
+    phone_number = models.CharField(max_length=15) 
+    tx_ref = models.CharField(max_length=100, unique=True) 
+    transaction_id = models.CharField(max_length=100, blank=True, null=True) 
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"TX: {self.tx_ref} - {self.status}"
+
+
+# Keep your legacy notes and sensor trackers intact at the bottom
+class Note(models.Model):
+    title = models.CharField(max_length=100)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notes")
+
+    def __str__(self):
+        return self.title
+
+class SensorReading(models.Model):
+    timestamp = models.DateTimeField(auto_now_add=True)
+    value = models.FloatField()
+
+    def __str__(self):
+        return f"{self.timestamp}: {self.value}"
+
+class StockMarketReading(models.Model):
+    timestamp = models.DateTimeField(auto_now_add=True)
+    value1 = models.FloatField()
+    value2 = models.FloatField()
+
+    def __str__(self):
+        return f"{self.timestamp}: {self.value1} / {self.value2}"
