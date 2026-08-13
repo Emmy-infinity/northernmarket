@@ -3,9 +3,36 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from cloudinary.models import CloudinaryField
 from django.utils import timezone
+from django.db.models.signals import post_save # 🧠 Essential for profile automation
+from django.dispatch import receiver
 
 User = get_user_model()
 
+# =====================================================================
+# 🌟 USER PROFILE INFRASTRUCTURE (TRACKS THE PERSON'S CONTACTS)
+# =====================================================================
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    phone_number = models.CharField(max_length=15, blank=True, help_text="Primary business phone number")
+    whatsapp_number = models.CharField(max_length=15, blank=True, help_text="For direct quick-chats")
+
+    def __str__(self):
+        return f"Profile for {self.user.username}"
+
+# Automatically instantiate or update a user's contact profile whenever an account is built
+@receiver(post_save, sender=User)
+def create_or_update_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+    try:
+        instance.profile.save()
+    except UserProfile.DoesNotExist:
+        UserProfile.objects.create(user=instance)
+
+
+# =====================================================================
+# CORE MARKETPLACE LISTINGS BLUEPRINT
+# =====================================================================
 class Product(models.Model):
     CONDITION_CHOICES = [
         ('NEW', 'Brand New / Sealed'),
@@ -34,10 +61,24 @@ class Product(models.Model):
     item_location = models.CharField(max_length=10, choices=LOCATION_CHOICES, default='GULU')
     seller_location_details = models.CharField(max_length=255, help_text="e.g., Near Gulu University Main Gate")
     
-    # 🌟 RESTORED TIMESTAMPS
+    # 🌟 NEW INFRASTRUCTURE FIELD NODES FOR LOGISTICS & INQUIRIES
+    weight = models.DecimalField(
+        max_digits=6, 
+        decimal_places=2, 
+        null=True, 
+        blank=True, 
+        help_text="Weight in Kilograms (KG), e.g., 2.50"
+    )
+    contact_phone = models.CharField(
+        max_length=15, 
+        blank=True, 
+        help_text="Direct phone number for item inquiries (e.g., 256770000000)"
+    )
+    
+    # Restored Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # 🌟 B2B PREMIUM RANKING FIELDS
+    # B2B Premium Ranking Fields
     is_featured = models.BooleanField(default=False, db_index=True)
     featured_until = models.DateTimeField(null=True, blank=True, db_index=True)
 
@@ -58,6 +99,9 @@ class Photo(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+# =====================================================================
+# PAYMENT LEDGERS & HISTORICAL MODELS
+# =====================================================================
 class PaymentTransaction(models.Model):
     STATUS_CHOICES = [
         ('PENDING', 'Pending Payment Prompt'),
@@ -77,7 +121,6 @@ class PaymentTransaction(models.Model):
         return f"TX: {self.tx_ref} - {self.status}"
 
 
-# Keep your legacy notes and sensor trackers intact at the bottom
 class Note(models.Model):
     title = models.CharField(max_length=100)
     content = models.TextField()
@@ -87,12 +130,14 @@ class Note(models.Model):
     def __str__(self):
         return self.title
 
+
 class SensorReading(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     value = models.FloatField()
 
     def __str__(self):
         return f"{self.timestamp}: {self.value}"
+
 
 class StockMarketReading(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
