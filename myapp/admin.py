@@ -14,3 +14,19 @@ class ProductAdmin(ModelAdmin): # Inherits clean Tailwind CSS styling
     list_filter = ['condition', 'item_location']
     search_fields = ['title', 'description']
     inlines = [PhotoInline]
+
+from django.contrib.auth.models import User
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from unfold.admin import ModelAdmin
+from unfold.forms import UserChangeForm, UserCreationForm
+
+# 1. Unregister the built-in standard User admin layout
+admin.site.unregister(User)
+
+# 2. Re-register the User model using Unfold's premium Tailwind layout classes
+@admin.register(User)
+class UserAdmin(BaseUserAdmin, ModelAdmin):
+    # This securely overrides the input layouts with Tailwind components
+    form = UserChangeForm
+    add_form = UserCreationForm
+    change_password_form = UserChangeForm
