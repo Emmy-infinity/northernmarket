@@ -131,16 +131,25 @@ USE_I18N = True
 USE_TZ = True
 
 # Static & Media Base URL Mappings
+
+
+
+
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# 🌟 MEDIA FILES DISPATCH SYSTEM
+# =====================================================================
+# 🌟 THE COMPATIBILITY BRIDGE: SATISFIES OLD PACKAGES & NEW DJANGO
+# =====================================================================
+# 1. Old strings required by django-cloudinary-storage to prevent crashes
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+STATICFILES_STORAGE = 'cloudinary_storage.storage.StaticCloudinaryStorage'
 
-# 🌟 STATIC FILES DISPATCH SYSTEM (WhiteNoise handles compilation caching cleanly)
+# 2. Modern configuration dictionary block required by Django 5.x+
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
@@ -149,6 +158,9 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+
+
 
 # Cloudinary Framework Authentication
 cloudinary.config(
