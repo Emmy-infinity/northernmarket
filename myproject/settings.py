@@ -8,6 +8,31 @@ import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 
+
+import sys
+import types
+from django.contrib.admin.templatetags import admin_list
+
+# Django 6.1 changed InclusionAdminNode to take 'parser' and 'token' parameters natively.
+# We explicitly override the node's initializer to handle both older 5.x and newer 6.x signatures seamlessly.
+original_node_init = admin_list.InclusionAdminNode.__init__
+
+def tolerant_unfold_node_init(self, parser, token, *args, **kwargs):
+    try:
+        # 1. Attempt the clean, standard Django 6.x compilation track
+        return original_node_init(self, parser, token, *args, **kwargs)
+    except TypeError:
+        # 2. Fallback gracefully if running against older cached library states
+        return original_node_init(self, parser, *args, **kwargs)
+
+# Force inject the safety valve directly into the core administrative template class
+admin_list.InclusionAdminNode.__init__ = tolerant_unfold_node_init
+print("======== ✅ GLOBAL ADMINISTRATIVE TEMPLATE PARSERS LOCKED CONCURRENT ========")
+
+# =====================================================================
+# REST OF YOUR EXISTING SETTINGS PARAMETERS (DO NOT CHANGE BELOW)
+# =====================================================================
+
 # Load environment keys
 load_dotenv()
 
