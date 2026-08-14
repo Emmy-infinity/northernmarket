@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
+    'django_filters',
     
     # 🌟 TARGET CHOSEN SINGLE APP ROUTE ENTRY ONLY:
     "myapp.apps.MyappConfig",  # Forces Django to execute emergency SQL syncs!
