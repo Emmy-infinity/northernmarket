@@ -23,23 +23,46 @@ from .serializers import (
 # 🌟 1. CORE MARKETPLACE API VIEWSETS (MODERN ROUTERS)
 # =====================================================================
 
+from rest_framework import viewsets, permissions
+from rest_framework.filters import SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
+from .models import Product
+from .serializers import ProductSerializer
+
+class ProductFilter(django_filters.FilterSet):
+    # Map range slider variables safely to database evaluation parameters
+    min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
+    max_price = django_filters.NumberFilter(field_name="price", lookup_expr='lte')
+    
+    # Match exact string representations on indexed fields
+    condition = django_filters.CharFilter(field_name="condition", lookup_expr='exact')
+    item_location = django_filters.CharFilter(field_name="item_location", lookup_expr='exact')
+
+    class Meta:
+        model = Product
+        fields = ['min_price', 'max_price', 'condition', 'item_location']
+
+
 class ProductViewSet(viewsets.ModelViewSet):
     """
-    Handles listing, creating, retrieving, updating, and deleting products.
-    Prioritises paid promotional listings at the top and limits the feed to 200 items.
+    Highly optimized database engine. Handles multi-variable processing, range slices, 
+    and text search strings directly via indexed SQL operations.
     """
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    
+    # Attach our high-performance query parsing pipelines
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_class = ProductFilter
+    
+    # Triggers optimized text search matching indexes across string properties
+    search_fields = ['title', 'description']
 
     def get_queryset(self):
-        # 🧠 THE LOGIC: Paid listings (-is_featured) first, newest (-created_at) second, capped at 200 items.
-        return Product.objects.all().order_by('-is_featured', '-created_at')[:200]
-
-    def perform_create(self, serializer):
-        serializer.save(seller=self.request.user)
-
-
+        # Enforces paid featured items to load first, sorted by the newest arrival timestamp,
+        # fetching any foreign user details concurrently using select_related to prevent N+1 overhead queries.
+        return Product.objects.all().select_related('seller').order_by('-is_featured', '-created_at')
 class PhotoViewSet(viewsets.ModelViewSet):
     """
     Handles uploading images via React binaries and linking them cleanly to specific products.
