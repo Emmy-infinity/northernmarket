@@ -62,40 +62,39 @@ class PhotoSerializer(serializers.ModelSerializer):
                 return str(obj.image)
         return None
 
+# Open your local project ──> myapp/serializers.py
+from rest_framework import serializers
+from .models import Product, Photo
+
 class ProductSerializer(serializers.ModelSerializer):
-    # 'photos' matches the related_name='photos' string defined inside your Photo ForeignKey model
-    # read_only=True ensures image upload logic is handled on its own separate endpoint
-    photos = PhotoSerializer(many=True, read_only=True)
+    seller_username = serializers.ReadOnlyField(source='seller.username')
+    seller_email = serializers.ReadOnlyField(source='seller.email')
     
-    # Human-readable displays for choices fields on the React frontend
-    condition_display = serializers.CharField(source='get_condition_display', read_only=True)
-    item_location_display = serializers.CharField(source='get_item_location_display', read_only=True)
-    
-    # Display the seller's username instead of just a raw database integer number
-    seller_username = serializers.CharField(source='seller.username', read_only=True)
+    # 🌟 ADVANCED INSIGHTS METRICS (Calculated dynamically on request)
+    days_since_listing = serializers.SerializerMethodField()
+    bulk_delivery_estimate_ugx = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
-            'id', 
-            'seller', 
-            'seller_username',
-            'title', 
-            'description', 
-            'price', 
-            'condition', 
-            'condition_display', 
-            'stock_count', 
-            'item_location', 
-            'item_location_display', 
-            'seller_location_details', 
-            'photos', # Returns an array of nested photo objects
-            'created_at'
+            'id', 'seller', 'seller_username', 'seller_email', 'title', 
+            'description', 'price', 'condition', 'condition_display', 
+            'stock_count', 'item_location', 'item_location_display', 
+            'seller_location_details', 'weight', 'contact_phone', 
+            'photos', 'is_featured', 'created_at', 'days_since_listing',
+            'bulk_delivery_estimate_ugx'
         ]
-        read_only_fields = ['id', 'seller', 'created_at']
 
+    def get_days_since_listing(self, obj):
+        from django.utils import timezone
+        delta = timezone.now() - obj.created_at
+        return max(0, delta.days)
 
-
+    def get_bulk_delivery_estimate_ugx(self, obj):
+        # Local East African logistics rule: Base rate 5,000 UGX + 2,500 UGX per extra KG
+        if not obj.weight:
+            return 7000 
+        return int(5000 + (float(obj.weight) * 2500))
 
 
 
