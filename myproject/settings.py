@@ -159,6 +159,10 @@ STORAGES = {
     },
 }
 
+FLW_SECRET_KEY = os.environ.get("FLUTTERWAVE_SECRET_KEY")
+FLW_SECRET_HASH = os.environ.get("FLUTTERWAVE_WEBHOOK_SECRET_HASH")
+
+
 
 
 
