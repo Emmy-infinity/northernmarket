@@ -1,38 +1,40 @@
+# Open your local project ──> myapp/views.py
+import uuid
 from django.contrib.auth.models import User
-from rest_framework import generics
+from django.utils import timezone
+from rest_framework import generics, viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-
-
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
-from .models import Note, SensorReading, Photo, StockMarketReading
+# Unified local model and serializer imports
+from .models import Note, SensorReading, Photo, StockMarketReading, Product, PaymentTransaction
 from .serializers import (
     SensorReadingSerializer, 
     UserSerializer, 
     NoteSerializer, 
-    PhotoSerializer
+    PhotoSerializer,
+    ProductSerializer,
+    PaymentTransactionSerializer
 )
 
-
-
-#  PASTE THIS INSTEAD:
-from rest_framework import viewsets, permissions
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from .models import Product, Photo
-from .serializers import ProductSerializer, PhotoSerializer
+# =====================================================================
+# 🌟 1. CORE MARKETPLACE API VIEWSETS (MODERN ROUTERS)
+# =====================================================================
 
 class ProductViewSet(viewsets.ModelViewSet):
     """
     Handles listing, creating, retrieving, updating, and deleting products.
+    Prioritises paid promotional listings at the top and limits the feed to 200 items.
     """
-    queryset = Product.objects.all().order_by('-created_at')
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    
-    # Class-based viewsets use the property directly without an import wrapper!
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        # 🧠 THE LOGIC: Paid listings (-is_featured) first, newest (-created_at) second, capped at 200 items.
+        return Product.objects.all().order_by('-is_featured', '-created_at')[:200]
 
     def perform_create(self, serializer):
         serializer.save(seller=self.request.user)
@@ -40,13 +42,11 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 class PhotoViewSet(viewsets.ModelViewSet):
     """
-    Handles uploading images and linking them to specific products.
+    Handles uploading images via React binaries and linking them cleanly to specific products.
     """
     queryset = Photo.objects.all()
     serializer_class = PhotoSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    
-    # MultiPartParser handles your incoming React image binaries perfectly
     parser_classes = [MultiPartParser, FormParser]
 
     def perform_create(self, serializer):
@@ -61,7 +61,142 @@ class PhotoViewSet(viewsets.ModelViewSet):
             serializer.save()
 
 
+# Open your local project ──> myapp/views.py
+import requests
+from django.conf import settings
+from rest_framework import viewsets, status
+from rest_framework.response import Response
+from .models import Product, PaymentTransaction
+from .serializers import PaymentTransactionSerializer
 
+class PaymentTransactionViewSet(viewsets.ModelViewSet):
+    queryset = PaymentTransaction.objects.all().order_by('-created_at')
+    serializer_class = PaymentTransactionSerializer
+
+    def create(self, request, *args, **kwargs):
+        payload = request.data
+        product_id = payload.get('product')
+        phone = payload.get('phone_number') # Expected format from React: 256770000000
+        fixed_fee = 20000.00                # 20,000 UGX flat premium listing fee
+        
+        try:
+            product = Product.objects.get(id=product_id, seller=request.user)
+            unique_ref = f"GULU-B2B-PROMO-{uuid.uuid4().hex[:8].upper()}"
+            
+            # 1. Lock the local database ledger row safely
+            transaction = PaymentTransaction.objects.create(
+                product=product, amount=fixed_fee, phone_number=phone,
+                tx_ref=unique_ref, status='PENDING'
+            )
+            
+            # 2. Structure the outward Flutterwave request payload
+            flw_url = "https://flutterwave.com"
+            flw_headers = {
+                "Authorization": f"Bearer {settings.FLW_SECRET_KEY}",
+                "Content-Type": "application/json"
+            }
+            flw_payload = {
+                "tx_ref": unique_ref,
+                "amount": str(fixed_fee),
+                "currency": "UGX",
+                "phone_number": phone,
+                "email": request.user.email,
+                "fullname": f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
+            }
+            
+            # 3. Dispatch the payload request directly to Flutterwave over HTTPS
+            try:
+                flw_response = requests.post(flw_url, json=flw_payload, headers=flw_headers, timeout=15)
+                flw_data = flw_response.json()
+                
+                # If Flutterwave successfully accepts the prompt request
+                if flw_response.status_code == 200 and flw_data.get("status") == "success":
+                    print(f"📡 STK Push notification fired successfully via Flutterwave for {phone}")
+                else:
+                    # Update local state tracking if Flutterwave instantly rejects the number
+                    transaction.status = 'FAILED'
+                    transaction.save()
+                    return Response({"error": flw_data.get("message", "Aggregator payment prompt rejected.")}, status=400)
+                    
+            except requests.exceptions.RequestException:
+                transaction.status = 'FAILED'
+                transaction.save()
+                return Response({"error": "Payment aggregator network timeout. Please retry."}, status=503)
+
+            serializer = self.get_serializer(transaction)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+        except Product.DoesNotExist:
+            return Response({"error": "Product assignment validation failed."}, status=404)
+
+# Add to the bottom of myapp/views.py
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from django.utils import timezone
+from datetime import timedelta
+
+@api_view(['POST'])
+@permission_classes([AllowAny]) # Flutterwave must be allowed public access to ping this route
+def flutterwave_payment_webhook(request):
+    """
+    Listens for Flutterwave's background notification when a user inputs their phone PIN.
+    """
+    # 🌟 SECURITY GUARD: Validate the signature token hash to verify this is genuinely Flutterwave
+    signature = request.headers.get('Verif-Hash')
+    if not signature or signature != settings.FLW_SECRET_HASH:
+        return Response({"error": "Unauthorised signature handshake verification failed."}, status=401)
+        
+    payload = request.data
+    event = payload.get('event')
+    
+    # We only care when a transaction officially concludes
+    if event == "charge.completed":
+        data = payload.get('data', {})
+        tx_ref = data.get('tx_ref')
+        status_flag = data.get('status') # 'successful' or 'failed'
+        flw_id = data.get('id')
+        
+        try:
+            transaction = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            
+            # Guard loop: Only process if we haven't already marked it successful
+            if transaction.status == 'PENDING':
+                if status_flag == "successful":
+                    # 1. Update the ledger row permanently
+                    transaction.status = 'SUCCESSFUL'
+                    transaction.transaction_id = str(flw_id)
+                    transaction.save()
+                    
+                    # 2. Promote the product visibility inside the top 200 feed array
+                    product = transaction.product
+                    product.is_featured = True
+                    product.featured_until = timezone.now() + timedelta(days=30) # Active for 30 days
+                    product.save()
+                    
+                    print(f"🎉 Success! Product #{product.id} successfully promoted to Top 200.")
+                else:
+                    transaction.status = 'FAILED'
+                    transaction.save()
+                    
+            return Response({"status": "acknowledged"}, status=200)
+            
+        except PaymentTransaction.DoesNotExist:
+            return Response({"error": "Transaction trace reference ledger matching code not found."}, status=404)
+            
+    return Response({"status": "ignored"}, status=200)
+
+
+
+
+# =====================================================================
+# 📝 2. LEGACY GENERICS & AUTHENTICATION ENDPOINTS
+# =====================================================================
+
+class CreateUserView(generics.CreateAPIView):
+    """Handles frontend public user account registration."""
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [AllowAny]
 
 
 class NoteListCreate(generics.ListCreateAPIView):
@@ -69,14 +204,10 @@ class NoteListCreate(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        return Note.objects.filter(author=user)
+        return Note.objects.filter(author=self.request.user)
 
     def perform_create(self, serializer):
-        if serializer.is_valid():
-            serializer.save(author=self.request.user)
-        else:
-            print(serializer.errors)
+        serializer.save(author=self.request.user)
 
 
 class NoteDelete(generics.DestroyAPIView):
@@ -85,17 +216,16 @@ class NoteDelete(generics.DestroyAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        return Note.objects.filter(author=user)
+        return Note.objects.filter(author=self.request.user)
 
 
-class CreateUserView(generics.CreateAPIView):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = [AllowAny]
-
+# =====================================================================
+# 📊 3. ANALYTICS & SENSOR GRAPH DATA ENDPOINTS
+# =====================================================================
 
 class ChartDataView2(APIView):
+    permission_classes = [AllowAny]
+    
     def get(self, request):
         readings = StockMarketReading.objects.all().order_by('timestamp')
         x = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
@@ -103,64 +233,23 @@ class ChartDataView2(APIView):
         y2 = [r.value2 for r in readings]
         chart_data = {
             "data": [
-                {
-                    "x": x,
-                    "y": y1,
-                    "type": "scatter",
-                    "mode": "lines+markers",
-                    "name": "Stock Value 1",
-                },
-                {
-                    "x": x,
-                    "y": y2,
-                    "type": "scatter",
-                    "mode": "lines+markers",
-                    "name": "Stock Value 2",
-                }
+                {"x": x, "y": y1, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 1"},
+                {"x": x, "y": y2, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 2"}
             ],
-            "layout": {
-                "title": "Stock Market Reading",
-                "xaxis": {"title": "Time"},
-                "yaxis": {"title": "Value"},
-            }
+            "layout": {"title": "Stock Market Reading", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
         }
         return Response(chart_data)
 
 
 class ChartDataView(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request):
         readings = SensorReading.objects.all().order_by('timestamp')
         x = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
         y = [r.value for r in readings]
-
         chart_data = {
-            "data": [
-                {
-                    "x": x,
-                    "y": y,
-                    "type": "scatter",
-                    "mode": "lines+markers",
-                    "name": "Sensor",
-                }
-            ],
-            "layout": {
-                "title": "Sensor Data",
-                "xaxis": {"title": "Time"},
-                "yaxis": {"title": "Value"},
-            }
+            "data": [{"x": x, "y": y, "type": "scatter", "mode": "lines+markers", "name": "Sensor"}],
+            "layout": {"title": "Sensor Data", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
         }
         return Response(chart_data)
-
-
-# Cloudinary Photo Endpoints
-class ImageListView(generics.ListAPIView):
-    queryset = Photo.objects.all()
-    serializer_class = PhotoSerializer
-    permission_classes = [AllowAny]
-
-
-class ImageUploadView(generics.CreateAPIView):
-    queryset = Photo.objects.all()
-    serializer_class = PhotoSerializer
-    parser_classes = (MultiPartParser, FormParser)  # Required to handle image binaries
-    permission_classes = [AllowAny]
