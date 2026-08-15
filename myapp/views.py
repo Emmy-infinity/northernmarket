@@ -62,6 +62,15 @@ class ProductViewSet(viewsets.ModelViewSet):
         # while keeping the high-performance sorting indices locked down.
         return Product.objects.all().order_by('-is_featured', '-created_at')
 
+    # 🌟 THE ABSOLUTE PRODUCTION PATCH: Resolves the column "seller_id" violates not-null constraint
+    def perform_create(self, serializer):
+        """
+        Intercepts the incoming request context, extracts the authenticated user 
+        profile directly from the verified JWT token, and explicitly binds them 
+        as the seller before committing the database record row.
+        """
+        serializer.save(seller=self.request.user)
+
 class PhotoViewSet(viewsets.ModelViewSet):
     """
     Handles uploading images via React binaries and linking them cleanly to specific products.
