@@ -1,4 +1,3 @@
-# Open your local project ──> myapp/serializers.py
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework import serializers
@@ -38,7 +37,6 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
 # 📸 3. MULTI-IMAGE ASSETS COMPRESSION PIPELINE (FIXED SINGLE DEFINITION)
 # =====================================================================
 class PhotoSerializer(serializers.ModelSerializer):
-    # 🧠 Use SerializerMethodField to ensure Cloudinary handles paths cleanly
     image_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -55,13 +53,14 @@ class PhotoSerializer(serializers.ModelSerializer):
 
 
 # =====================================================================
-# 🌾 4. B2B MARKETPLACE PRODUCT LISTING GRID ENGINE
+# 🌾 4. B2B MARKETPLACE PRODUCT LISTING GRID ENGINE (SYNCHRONIZED)
 # =====================================================================
 class ProductSerializer(serializers.ModelSerializer):
+    # 🌟 FIXED COMPLIANCE INTERCEPT: seller is marked read-only to stop missing parameter validation breaks
+    seller = serializers.ReadOnlyField(source='seller.id')
     seller_username = serializers.ReadOnlyField(source='seller.username')
     seller_email = serializers.ReadOnlyField(source='seller.email')
     
-    # Binds our clean PhotoSerializer dictionary array layout
     photos = PhotoSerializer(many=True, read_only=True)
     
     condition_display = serializers.ReadOnlyField(source='get_condition_display')
@@ -80,6 +79,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'photos', 'is_featured', 'created_at', 'days_since_listing',
             'bulk_delivery_estimate_ugx'
         ]
+        # 🌟 PRODUCTION VETTED PROTECTION: Explicit security declaration for relational markers
+        read_only_fields = ['id', 'seller', 'is_featured', 'created_at']
 
     def get_days_since_listing(self, obj):
         delta = timezone.now() - obj.created_at
