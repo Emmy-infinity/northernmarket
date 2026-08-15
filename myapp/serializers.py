@@ -63,14 +63,20 @@ class PhotoSerializer(serializers.ModelSerializer):
         return None
 
 # Open your local project ──> myapp/serializers.py
+# Open your local project ──> myapp/serializers.py
 from rest_framework import serializers
+from django.utils import timezone
 from .models import Product, Photo
 
 class ProductSerializer(serializers.ModelSerializer):
     seller_username = serializers.ReadOnlyField(source='seller.username')
     seller_email = serializers.ReadOnlyField(source='seller.email')
     
-    # 🌟 ADVANCED INSIGHTS METRICS (Calculated dynamically on request)
+    # 🌟 THE COMPATIBILITY BRIDGE: Map the selection method variables explicitly
+    condition_display = serializers.ReadOnlyField(source='get_condition_display')
+    item_location_display = serializers.ReadOnlyField(source='get_item_location_display')
+    
+    # Calculated analytics metadata fields
     days_since_listing = serializers.SerializerMethodField()
     bulk_delivery_estimate_ugx = serializers.SerializerMethodField()
 
@@ -86,12 +92,11 @@ class ProductSerializer(serializers.ModelSerializer):
         ]
 
     def get_days_since_listing(self, obj):
-        from django.utils import timezone
         delta = timezone.now() - obj.created_at
         return max(0, delta.days)
 
     def get_bulk_delivery_estimate_ugx(self, obj):
-        # Local East African logistics rule: Base rate 5,000 UGX + 2,500 UGX per extra KG
+        # Base rate 5,000 UGX + 2,500 UGX per extra KG
         if not obj.weight:
             return 7000 
         return int(5000 + (float(obj.weight) * 2500))
