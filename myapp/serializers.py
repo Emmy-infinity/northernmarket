@@ -79,6 +79,18 @@ class PhotoSerializer(serializers.ModelSerializer):
         fields = ['id', 'image', 'image_url', 'created_at']
 
 
+# Open your local project ──> myapp/serializers.py
+from rest_framework import serializers
+from django.utils import timezone
+from .models import Product, Photo
+
+# 🌟 1. DEFINE THE PHOTO LIST MAP TRACKER FIRST
+class PhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Photo
+        fields = ['id', 'image', 'image_url', 'created_at']
+
+
 # 🌟 2. PLUG IT DIRECTLY INTO YOUR PRIMARY PRODUCTS SHEET
 class ProductSerializer(serializers.ModelSerializer):
     seller_username = serializers.ReadOnlyField(source='seller.username')
