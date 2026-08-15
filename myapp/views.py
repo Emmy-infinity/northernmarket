@@ -52,7 +52,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     filterset_class = ProductFilter
     search_fields = ['title', 'description']
     
-    # 🌟 parser_classes use the properties natively
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
@@ -62,19 +61,20 @@ class ProductViewSet(viewsets.ModelViewSet):
         # 1. First, save the master product row bound to the logged-in JWT profile context
         product_instance = serializer.save(seller=self.request.user)
         
-        # 2. 🌟 MULTI-IMAGE FRONTEND RESOLUTION: Intercepts the file array queue cleanly
+        # 2. Extract an array list queue of multiple images dispatched from React
         uploaded_images = self.request.FILES.getlist('image')
         
         if uploaded_images:
-            print(f"📡 Backend Multi-Media Interceptor: Processing {len(uploaded_images)} diagnostic assets simultaneously...")
-            
-            # Loop through the files array list matrix and save every entry mapped directly to our product foreign key relation
+            print(f"📡 Backend Multi-Media Interceptor: Processing {len(uploaded_images)} diagnostic assets...")
             for image_file in uploaded_images:
                 Photo.objects.create(
                     product=product_instance,
                     image=image_file
                 )
-            print("🎉 Success - All multi-photo presentation frames saved and anchored into the database schema!")
+            print("🎉 Success - All multi-photo frames saved and anchored into the database schema!")
+
+
+
 
 
 class PhotoViewSet(viewsets.ModelViewSet):
@@ -97,6 +97,8 @@ class PhotoViewSet(viewsets.ModelViewSet):
                 serializer.save()
         else:
             serializer.save()
+
+
 # =====================================================================
 # 💳 2. MOBILE MONEY BILLING ENGINE VIEWSETS
 # =====================================================================
@@ -297,18 +299,5 @@ class ImageUploadView(generics.CreateAPIView):
     serializer_class = PhotoSerializer
     parser_classes = (MultiPartParser, FormParser)  
     permission_classes = [AllowAny]
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
