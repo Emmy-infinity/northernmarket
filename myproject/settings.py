@@ -136,12 +136,24 @@ STATICFILES_STORAGE = 'cloudinary_storage.storage.StaticCloudinaryStorage'
 
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
     "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    # Add your live frontend Render URL here once deployed, e.g.:
-    # "https://your-frontend-app.onrender.com"
+    "http://localhost:3000",
+    "https://northernmarket-pwa.onrender.com",  # ADD YOUR PWA DOMAIN
+]
+
+# Ensure these security variables are present
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
 ]
 
 # Open your local project ──> myproject/settings.py
