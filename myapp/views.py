@@ -1,82 +1,4 @@
-import uuid
-import requests
-from django.contrib.auth.models import User
-from django.utils import timezone
-from django.conf import settings
-from rest_framework import generics, viewsets, permissions, status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.filters import SearchFilter
-from django_filters.rest_framework import DjangoFilterBackend
-import django_filters
-
-# Unified local model and serializer imports
-from .models import Note, SensorReading, Photo, StockMarketReading, Product, PaymentTransaction
-from .serializers import (
-    SensorReadingSerializer, 
-    UserSerializer, 
-    NoteSerializer, 
-    PhotoSerializer,
-    ProductSerializer,
-    PaymentTransactionSerializer
-)
-
-# =====================================================================
-# 🎛️ MULTIVARIABLE FILTERS SCHEMAS
-# =====================================================================
-class ProductFilter(django_filters.FilterSet):
-    min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
-    max_price = django_filters.NumberFilter(field_name="price", lookup_expr='lte')
-    condition = django_filters.CharFilter(field_name="condition", lookup_expr='exact')
-    item_location = django_filters.CharFilter(field_name="item_location", lookup_expr='exact')
-
-    class Meta:
-        model = Product
-        fields = ['min_price', 'max_price', 'condition', 'item_location']
-
-
-# =====================================================================
-# 🏪 1. B2B MARKETPLACE ENGINE VIEWSETS (CORRECTED MULTI-PHOTO SAVE)
-# =====================================================================
-class ProductViewSet(viewsets.ModelViewSet):
-    """
-    Highly optimized database engine. Handles multi-variable processing, range slices, 
-    and text search strings directly via indexed SQL operations.
-    """
-    serializer_class = ProductSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    filter_backends = [DjangoFilterBackend, SearchFilter]
-    filterset_class = ProductFilter
-    search_fields = ['title', 'description']
-    
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
-
-    def get_queryset(self):
-        return Product.objects.all().order_by('-is_featured', '-created_at')
-
-    def perform_create(self, serializer):
-        # 1. First, save the master product row bound to the logged-in JWT profile context
-        product_instance = serializer.save(seller=self.request.user)
-        
-        # 2. Extract an array list queue of multiple images dispatched from React
-        uploaded_images = self.request.FILES.getlist('image')
-        
-        if uploaded_images:
-            print(f"📡 Backend Multi-Media Interceptor: Processing {len(uploaded_images)} diagnostic assets...")
-            for image_file in uploaded_images:
-                Photo.objects.create(
-                    product=product_instance,
-                    image=image_file
-                )
-            print("🎉 Success - All multi-photo frames saved and anchored into the database schema!")
-
-
-
-
-
+# 🌟 RESTORED ENTIRE ROUTING CLASS TARGET ENGINE FOR URLS REGISTER MAPS
 class PhotoViewSet(viewsets.ModelViewSet):
     """
     Handles uploading images via React binaries and linking them cleanly to specific products.
@@ -299,5 +221,3 @@ class ImageUploadView(generics.CreateAPIView):
     serializer_class = PhotoSerializer
     parser_classes = (MultiPartParser, FormParser)  
     permission_classes = [AllowAny]
-
-
