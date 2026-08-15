@@ -1,4 +1,84 @@
-# 🌟 RESTORED ENTIRE ROUTING CLASS TARGET ENGINE FOR URLS REGISTER MAPS
+import uuid
+import requests
+from django.contrib.auth.models import User
+from django.utils import timezone
+from django.conf import settings
+from rest_framework import generics, viewsets, permissions, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.filters import SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
+
+# Core internal model records maps
+from .models import Note, SensorReading, Photo, StockMarketReading, Product, PaymentTransaction
+from .serializers import (
+    SensorReadingSerializer, 
+    UserSerializer, 
+    NoteSerializer, 
+    PhotoSerializer,
+    ProductSerializer,
+    PaymentTransactionSerializer
+)
+
+# =====================================================================
+# 🎛️ MULTIVARIABLE RANGE SLIDER GRAPH SEARCH FILTERS
+# =====================================================================
+class ProductFilter(django_filters.FilterSet):
+    min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
+    max_price = django_filters.NumberFilter(field_name="price", lookup_expr='lte')
+    condition = django_filters.CharFilter(field_name="condition", lookup_expr='exact')
+    item_location = django_filters.CharFilter(field_name="item_location", lookup_expr='exact')
+
+    class Meta:
+        model = Product
+        fields = ['min_price', 'max_price', 'condition', 'item_location']
+
+
+# =====================================================================
+# 🏪 1. PRIMARY PLATFORM MARKETPLACE STOCK VIEWSETS
+# =====================================================================
+class ProductViewSet(viewsets.ModelViewSet):
+    """
+    Highly optimized database engine. Handles multi-variable processing, range slices, 
+    and text search strings directly via indexed SQL operations.
+    """
+    serializer_class = ProductSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_class = ProductFilter
+    search_fields = ['title', 'description']
+    
+    # Restores pristine multi-part form data array stream parsing
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        return Product.objects.all().order_by('-is_featured', '-created_at')
+
+    def perform_create(self, serializer):
+        # 1. Instantiates product model record row mapped to the active merchant session token
+        product_instance = serializer.save(seller=self.request.user)
+        
+        # 2. Captures an entire array data queue of multiple files sent under the 'image' key identifier
+        uploaded_images = self.request.FILES.getlist('image')
+        
+        if uploaded_images:
+            print(f"📡 Backend Multi-Media Interceptor: Processing {len(uploaded_images)} diagnostic assets simultaneously...")
+            for image_file in uploaded_images:
+                Photo.objects.create(
+                    product=product_instance,
+                    image=image_file
+                )
+            print("🎉 Success - All multi-photo presentation frames saved and anchored into the database schema!")
+
+
+
+# =====================================================================
+# 📸 2. MULTI-IMAGE ASSETS FILE ROUTER VIEWSETS (URL ROUTER TARGET)
+# =====================================================================
 class PhotoViewSet(viewsets.ModelViewSet):
     """
     Handles uploading images via React binaries and linking them cleanly to specific products.
@@ -22,7 +102,7 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 💳 2. MOBILE MONEY BILLING ENGINE VIEWSETS
+# 💳 3. SECURED UGANDA MOBILE MONEY BILLING TRANSACTION ENGINE
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     queryset = PaymentTransaction.objects.all().order_by('-created_at')
@@ -114,7 +194,7 @@ def flutterwave_payment_webhook(request):
 
 
 # =====================================================================
-# 📝 3. LEGACY NOTE MANAGEMENT TRACKS
+# 📝 4. TRADER NOTE AND SECURITY ACCESS EXTENSION CHANNELS
 # =====================================================================
 class NoteListCreate(generics.ListCreateAPIView):
     serializer_class = NoteSerializer
@@ -148,7 +228,7 @@ class CreateUserView(generics.CreateAPIView):
 
 
 # =====================================================================
-# 📊 4. LOGISTICS CHART & REPAIR DATA READINGS
+# 📊 5. LOGISTICS PLOTLY GRAPH READINGS & HARDWARE SENSORS LOGS
 # =====================================================================
 class ChartDataView2(APIView):
     def get(self, request):
@@ -207,9 +287,6 @@ class ChartDataView(APIView):
         return Response(chart_data)
 
 
-# =====================================================================
-# 📸 5. CLOUDINARY DIRECT COMPRESSION CHANNELS
-# =====================================================================
 class ImageListView(generics.ListAPIView):
     queryset = Photo.objects.all()
     serializer_class = PhotoSerializer
@@ -221,3 +298,4 @@ class ImageUploadView(generics.CreateAPIView):
     serializer_class = PhotoSerializer
     parser_classes = (MultiPartParser, FormParser)  
     permission_classes = [AllowAny]
+
