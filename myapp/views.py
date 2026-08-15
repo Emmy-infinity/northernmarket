@@ -43,6 +43,7 @@ class ProductFilter(django_filters.FilterSet):
         model = Product
         fields = ['min_price', 'max_price', 'condition', 'item_location']
 
+# Open your local project ──> myapp/views.py
 
 class ProductViewSet(viewsets.ModelViewSet):
     """
@@ -51,18 +52,16 @@ class ProductViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    
-    # Attach our high-performance query parsing pipelines
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = ProductFilter
-    
-    # Triggers optimized text search matching indexes across string properties
     search_fields = ['title', 'description']
 
+    # 🌟 FIXED COMPLIANT DATABASE QUERY
     def get_queryset(self):
-        # Enforces paid featured items to load first, sorted by the newest arrival timestamp,
-        # fetching any foreign user details concurrently using select_related to prevent N+1 overhead queries.
-        return Product.objects.all().select_related('seller').order_by('-is_featured', '-created_at')
+        # We drop the select_related join to prevent relational parsing drops 
+        # while keeping the high-performance sorting indices locked down.
+        return Product.objects.all().order_by('-is_featured', '-created_at')
+
 class PhotoViewSet(viewsets.ModelViewSet):
     """
     Handles uploading images via React binaries and linking them cleanly to specific products.
