@@ -45,6 +45,27 @@ class ProductFilter(django_filters.FilterSet):
 
 # Open your local project ──> myapp/views.py
 
+# Open your backend code file ──> myapp/views.py
+from rest_framework import viewsets, permissions, status
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.filters import SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
+
+from .models import Product, Photo
+from .serializers import ProductSerializer
+
+class ProductFilter(django_filters.FilterSet):
+    min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
+    max_price = django_filters.NumberFilter(field_name="price", lookup_expr='lte')
+    condition = django_filters.CharFilter(field_name="condition", lookup_expr='exact')
+    item_location = django_filters.CharFilter(field_name="item_location", lookup_expr='exact')
+
+    class Meta:
+        model = Product
+        fields = ['min_price', 'max_price', 'condition', 'item_location']
+
 class ProductViewSet(viewsets.ModelViewSet):
     """
     Highly optimized database engine. Handles multi-variable processing, range slices, 
@@ -55,52 +76,31 @@ class ProductViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = ProductFilter
     search_fields = ['title', 'description']
+    
+    # 🌟 CRITICAL ENHANCEMENT: Lock in comprehensive parser support for unified streams
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    # 🌟 FIXED COMPLIANT DATABASE QUERY
     def get_queryset(self):
-        # We drop the select_related join to prevent relational parsing drops 
-        # while keeping the high-performance sorting indices locked down.
         return Product.objects.all().order_by('-is_featured', '-created_at')
 
-    # 🌟 THE ABSOLUTE PRODUCTION PATCH: Resolves the column "seller_id" violates not-null constraint
+    # 🌟 THE TRANSACTING COMPLIANCE UPGRADE: Captures text variables and binary streams simultaneously
     def perform_create(self, serializer):
-        """
-        Intercepts the incoming request context, extracts the authenticated user 
-        profile directly from the verified JWT token, and explicitly binds them 
-        as the seller before committing the database record row.
-        """
-        serializer.save(seller=self.request.user)
-
-# Open your backend code file ──> myapp/views.py
-
-class PhotoViewSet(viewsets.ModelViewSet):
-    """
-    Handles uploading images via React binaries and linking them cleanly to specific products.
-    """
-    queryset = Photo.objects.all()
-    serializer_class = PhotoSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    parser_classes = [MultiPartParser, FormParser, JSONParser] # Includes JSON fallbacks safely
-
-    def perform_create(self, serializer):
-        # 🌟 THE ABSOLUTE BACKEND RESOLUTION: Safely extract and parse multi-part string parameters into real numbers
-        raw_product_id = self.request.data.get('product')
+        # 1. First, save the master product row bound to the logged-in JWT profile context
+        product_instance = serializer.save(seller=self.request.user)
         
-        if raw_product_id:
-            try:
-                # Force an explicit integer conversion to prevent database parameter mismatches
-                product_id = int(raw_product_id)
-                product = Product.objects.get(id=product_id)
-                
-                # 🛡️ Securely binds the photo binary directly to the product foreign key relationship!
-                serializer.save(product=product)
-                print(f"📸 Success - Image successfully anchored to Product ID: {product_id}")
-            except (ValueError, Product.DoesNotExist):
-                print(f"⚠️ Warning - Product lookup failed for ID reference: {raw_product_id}. Saving loose asset row.")
-                serializer.save()
-        else:
-            print("⚠️ Warning - No product context key passed inside FormData parameters.")
-            serializer.save()
+        # 2. Extract the file list queue matching your frontend field key target string
+        uploaded_images = self.request.FILES.getlist('image')
+        
+        if uploaded_images:
+            print(f"📡 Backend Multi-Media Interceptor: Processing {len(uploaded_images)} diagnostic assets simultaneously...")
+            
+            # Loop through the files list and instantiate a child model row bound to the foreign key
+            for image_file in uploaded_images:
+                Photo.objects.create(
+                    product=product_instance,
+                    image=image_file
+                )
+            print("🎉 Success - All multi-photo presentation frames saved and anchored into the database schema!")
 
 
 # Open your local project ──> myapp/views.py
