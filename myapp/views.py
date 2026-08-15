@@ -71,6 +71,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         """
         serializer.save(seller=self.request.user)
 
+# Open your backend code file ──> myapp/views.py
+
 class PhotoViewSet(viewsets.ModelViewSet):
     """
     Handles uploading images via React binaries and linking them cleanly to specific products.
@@ -78,17 +80,26 @@ class PhotoViewSet(viewsets.ModelViewSet):
     queryset = Photo.objects.all()
     serializer_class = PhotoSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser] # Includes JSON fallbacks safely
 
     def perform_create(self, serializer):
-        product_id = self.request.data.get('product')
-        if product_id:
+        # 🌟 THE ABSOLUTE BACKEND RESOLUTION: Safely extract and parse multi-part string parameters into real numbers
+        raw_product_id = self.request.data.get('product')
+        
+        if raw_product_id:
             try:
+                # Force an explicit integer conversion to prevent database parameter mismatches
+                product_id = int(raw_product_id)
                 product = Product.objects.get(id=product_id)
+                
+                # 🛡️ Securely binds the photo binary directly to the product foreign key relationship!
                 serializer.save(product=product)
-            except Product.DoesNotExist:
+                print(f"📸 Success - Image successfully anchored to Product ID: {product_id}")
+            except (ValueError, Product.DoesNotExist):
+                print(f"⚠️ Warning - Product lookup failed for ID reference: {raw_product_id}. Saving loose asset row.")
                 serializer.save()
         else:
+            print("⚠️ Warning - No product context key passed inside FormData parameters.")
             serializer.save()
 
 
