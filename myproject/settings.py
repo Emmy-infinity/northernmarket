@@ -134,27 +134,6 @@ DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 STATICFILES_STORAGE = 'cloudinary_storage.storage.StaticCloudinaryStorage'
 
 
-# CORS Settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://northernmarket-pwa.onrender.com",  # ADD YOUR PWA DOMAIN
-]
-
-# Ensure these security variables are present
-CORS_ALLOW_CREDENTIALS = True
-
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-]
 
 # Open your local project ──> myproject/settings.py
 
@@ -189,3 +168,29 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+
+# Open your backend file ──> myproject/settings.py
+
+# 🌟 PRODUCTION SECURITY ALIGNMENT: Explicitly whitelists your active progressive web app domain 
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://northernmarket-pwa.onrender.com", # Your PWA instance path
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+# Allows incoming frontend pre-flight headers to validate seamlessly
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
