@@ -67,16 +67,29 @@ class PhotoSerializer(serializers.ModelSerializer):
 from rest_framework import serializers
 from django.utils import timezone
 from .models import Product, Photo
+# Open your local project ──> myapp/serializers.py
+from rest_framework import serializers
+from django.utils import timezone
+from .models import Product, Photo
 
+# 🌟 1. DEFINE THE PHOTO LIST MAP TRACKER FIRST
+class PhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Photo
+        fields = ['id', 'image', 'image_url', 'created_at']
+
+
+# 🌟 2. PLUG IT DIRECTLY INTO YOUR PRIMARY PRODUCTS SHEET
 class ProductSerializer(serializers.ModelSerializer):
     seller_username = serializers.ReadOnlyField(source='seller.username')
     seller_email = serializers.ReadOnlyField(source='seller.email')
     
-    # 🌟 THE COMPATIBILITY BRIDGE: Map the selection method variables explicitly
+    # 🧠 THE ENGINE FIX: Instructs Django that 'photos' is an explicitly tracked multi-object child array list
+    photos = PhotoSerializer(many=True, read_only=True)
+    
     condition_display = serializers.ReadOnlyField(source='get_condition_display')
     item_location_display = serializers.ReadOnlyField(source='get_item_location_display')
     
-    # Calculated analytics metadata fields
     days_since_listing = serializers.SerializerMethodField()
     bulk_delivery_estimate_ugx = serializers.SerializerMethodField()
 
@@ -96,12 +109,9 @@ class ProductSerializer(serializers.ModelSerializer):
         return max(0, delta.days)
 
     def get_bulk_delivery_estimate_ugx(self, obj):
-        # Base rate 5,000 UGX + 2,500 UGX per extra KG
         if not obj.weight:
             return 7000 
         return int(5000 + (float(obj.weight) * 2500))
-
-
 
 
 
