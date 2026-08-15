@@ -1,102 +1,67 @@
-from django.db import models
+# Open your local project ──> myapp/serializers.py
 from django.contrib.auth.models import User
-from cloudinary.models import CloudinaryField
-
-from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework import serializers
-from .models import Note, SensorReading, Photo  # Import Photo model here, do not define it!
+from .models import Note, SensorReading, Photo, Product, PaymentTransaction
+
+# =====================================================================
+# 🔐 1. USER & AUTHENTICATION SERIALIZERS
+# =====================================================================
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "username", "password"]
+        extra_kwargs = {"password": {"write_only": True}}
+
+    def create(self, validated_data):
+        user = User.objects.create_user(**validated_data)
+        return user
 
 
-
-
-from rest_framework import serializers
-from .models import Product, Photo
-
-
-
-
-# Append to the very end of your local myapp/serializers.py file
-from .models import PaymentTransaction
-
+# =====================================================================
+# 💳 2. MOBILE MONEY BILLING TRANSACTION ENGINE
+# =====================================================================
 class PaymentTransactionSerializer(serializers.ModelSerializer):
-    # Returns the human-readable string version of the transaction choices
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    
-    # Returns the name of the product being promoted for clear UI receipts
     product_title = serializers.CharField(source='product.title', read_only=True)
 
     class Meta:
         model = PaymentTransaction
         fields = [
-            'id',
-            'product',
-            'product_title',
-            'amount',
-            'phone_number',
-            'tx_ref',
-            'transaction_id',
-            'status',
-            'status_display',
-            'created_at'
+            'id', 'product', 'product_title', 'amount', 'phone_number',
+            'tx_ref', 'transaction_id', 'status', 'status_display', 'created_at'
         ]
-        # Protect internal transaction parameters from being tampered with by the frontend
         read_only_fields = ['id', 'status', 'transaction_id', 'tx_ref', 'created_at']
 
 
+# =====================================================================
+# 📸 3. MULTI-IMAGE ASSETS COMPRESSION PIPELINE (FIXED SINGLE DEFINITION)
+# =====================================================================
 class PhotoSerializer(serializers.ModelSerializer):
-    # Use a SerializerMethodField to ensure Cloudinary always outputs clean absolute URLs
+    # 🧠 Use SerializerMethodField to ensure Cloudinary handles paths cleanly
     image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Photo
-        # Exclude the direct product relation field to avoid cluttering the frontend arrays
         fields = ['id', 'image_url']
 
     def get_image_url(self, obj):
         if obj.image:
-            # Safely extract the full 'https://cloudinary.com...' string
             try:
                 return obj.image.url
             except AttributeError:
-                # Fallback if it is stored as a raw string format in the database row
                 return str(obj.image)
         return None
 
-# Open your local project ──> myapp/serializers.py
-# Open your local project ──> myapp/serializers.py
-from rest_framework import serializers
-from django.utils import timezone
-from .models import Product, Photo
-# Open your local project ──> myapp/serializers.py
-from rest_framework import serializers
-from django.utils import timezone
-from .models import Product, Photo
 
-# 🌟 1. DEFINE THE PHOTO LIST MAP TRACKER FIRST
-class PhotoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Photo
-        fields = ['id', 'image', 'image_url', 'created_at']
-
-
-# Open your local project ──> myapp/serializers.py
-from rest_framework import serializers
-from django.utils import timezone
-from .models import Product, Photo
-
-# 🌟 1. DEFINE THE PHOTO LIST MAP TRACKER FIRST
-class PhotoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Photo
-        fields = ['id', 'image', 'image_url', 'created_at']
-
-
-# 🌟 2. PLUG IT DIRECTLY INTO YOUR PRIMARY PRODUCTS SHEET
+# =====================================================================
+# 🌾 4. B2B MARKETPLACE PRODUCT LISTING GRID ENGINE
+# =====================================================================
 class ProductSerializer(serializers.ModelSerializer):
     seller_username = serializers.ReadOnlyField(source='seller.username')
     seller_email = serializers.ReadOnlyField(source='seller.email')
     
-    # 🧠 THE ENGINE FIX: Instructs Django that 'photos' is an explicitly tracked multi-object child array list
+    # Binds our clean PhotoSerializer dictionary array layout
     photos = PhotoSerializer(many=True, read_only=True)
     
     condition_display = serializers.ReadOnlyField(source='get_condition_display')
@@ -126,18 +91,9 @@ class ProductSerializer(serializers.ModelSerializer):
         return int(5000 + (float(obj.weight) * 2500))
 
 
-
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ["id", "username", "password"]
-        extra_kwargs = {"password": {"write_only": True}}
-
-    def create(self, validated_data):
-        user = User.objects.create_user(**validated_data)
-        return user
-
-
+# =====================================================================
+# 📝 5. SENSOR READINGS & LEGACY NOTE MANAGEMENT TRACKS
+# =====================================================================
 class NoteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Note
@@ -152,6 +108,3 @@ class SensorReadingSerializer(serializers.ModelSerializer):
     class Meta:
         model = SensorReading
         fields = ['x', 'y']
-
-
-
