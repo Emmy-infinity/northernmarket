@@ -13,38 +13,64 @@ import sys
 import types
 from django.contrib.admin.templatetags import admin_list
 
-# Django 6.1 changed InclusionAdminNode to take 'parser' and 'token' parameters natively.
-# We explicitly override the node's initializer to handle both older 5.x and newer 6.x signatures seamlessly.
+# Django 6.1 compatibility patch for Unfold admin
 original_node_init = admin_list.InclusionAdminNode.__init__
 
 def tolerant_unfold_node_init(self, parser, token, *args, **kwargs):
     try:
-        # 1. Attempt the clean, standard Django 6.x compilation track
         return original_node_init(self, parser, token, *args, **kwargs)
     except TypeError:
-        # 2. Fallback gracefully if running against older cached library states
         return original_node_init(self, parser, *args, **kwargs)
 
-# Force inject the safety valve directly into the core administrative template class
 admin_list.InclusionAdminNode.__init__ = tolerant_unfold_node_init
 print("======== ✅ GLOBAL ADMINISTRATIVE TEMPLATE PARSERS LOCKED CONCURRENT ========")
 
 # =====================================================================
-# REST OF YOUR EXISTING SETTINGS PARAMETERS (DO NOT CHANGE BELOW)
+# LOAD ENVIRONMENT (keep hardcoded fallbacks for rapid testing)
 # =====================================================================
-
-# Load environment keys
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Security Parameters
+# ─── SECURITY (keep as-is for rapid testing) ────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
 DEBUG = True
-
 ALLOWED_HOSTS = ["*"]
 
-# REST Framework Ecosystem
+# ─── CORS ──────────────────────────────────────────────────────────────
+# 🔥 FIX: Added your production frontend URL to the allowed origins
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "https://northernmarket-pwa.onrender.com",   # ✅ YOUR PRODUCTION FRONTEND
+]
+
+# 🔥 Optional: Allow all origins temporarily (uncomment if needed)
+# CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept", "accept-encoding", "authorization",
+    "content-type", "dnt", "origin", "user-agent",
+    "x-csrftoken", "x-requested-with",
+]
+
+# 🔥 Force CORS headers for all responses (guarantees the header is present)
+class ForceCorsMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        # Allow your frontend origin (or use "*" for testing)
+        response["Access-Control-Allow-Origin"] = "https://northernmarket-pwa.onrender.com"
+        response["Access-Control-Allow-Headers"] = "accept, authorization, content-type"
+        response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        return response
+
+# ─── REST FRAMEWORK ────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -59,13 +85,13 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
 }
 
-# 🌟 INSTALLED APPLICATIONS (COMPLIANT OVERRIDES)
+# ─── INSTALLED APPS ────────────────────────────────────────────────────
 INSTALLED_APPS = [
-    'unfold',                  # Placed first to override administrative layout templates
-    'unfold.contrib.filters',  # Modern filtering modules
-    'cloudinary_storage',      # Asset pipeline hook (loads before contrib.admin)
+    'unfold',
+    'unfold.contrib.filters',
+    'cloudinary_storage',
     "django.contrib.admin",
-    'cloudinary',              # Core layout package tracking
+    'cloudinary',
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -74,15 +100,16 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     'django_filters',
-    
-    # 🌟 TARGET CHOSEN SINGLE APP ROUTE ENTRY ONLY:
-    "myapp.apps.MyappConfig",  # Forces Django to execute emergency SQL syncs!
+    "myapp.apps.MyappConfig",
 ]
 
+# ─── MIDDLEWARE ────────────────────────────────────────────────────────
+# 🔥 Insert our ForceCorsMiddleware at the very top to ensure CORS headers
 MIDDLEWARE = [
+    "myproject.settings.ForceCorsMiddleware",   # ✅ Force CORS (must be first)
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    'whitenoise.middleware.WhiteNoiseMiddleware', # Processes compressed static admin styles
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -111,7 +138,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "myproject.wsgi.application"
 
-# Database Configuration (Supports Render DATABASE_URL automatically)
+# ─── DATABASE ──────────────────────────────────────────────────────────
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}",
@@ -131,26 +158,17 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# Static & Media Base URL Mappings
-
-
-
-
-
+# ─── STATIC & MEDIA ────────────────────────────────────────────────────
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# =====================================================================
-# 🌟 THE COMPATIBILITY BRIDGE: SATISFIES OLD PACKAGES & NEW DJANGO
-# =====================================================================
-# 1. Old strings required by django-cloudinary-storage to prevent crashes
+# ─── STORAGE (Hardcoded Cloudinary – keep as-is for rapid testing) ──
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 STATICFILES_STORAGE = 'cloudinary_storage.storage.StaticCloudinaryStorage'
 
-# 2. Modern configuration dictionary block required by Django 5.x+
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
@@ -160,14 +178,7 @@ STORAGES = {
     },
 }
 
-FLW_SECRET_KEY = os.environ.get("FLUTTERWAVE_SECRET_KEY")
-FLW_SECRET_HASH = os.environ.get("FLUTTERWAVE_WEBHOOK_SECRET_HASH")
-
-
-
-
-
-# Cloudinary Framework Authentication
+# ─── CLOUDINARY CONFIG (Hardcoded – keep for rapid testing) ──────────
 cloudinary.config(
     cloud_name = 'dtll1o9u0',
     api_key = '387833656525477',
@@ -181,12 +192,8 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': 'AmTSvrVHKiLlN2ArzFgctGx_-70'
 }
 
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+# ─── FLUTTERWAVE (optional) ───────────────────────────────────────────
+FLW_SECRET_KEY = os.environ.get("FLUTTERWAVE_SECRET_KEY")
+FLW_SECRET_HASH = os.environ.get("FLUTTERWAVE_WEBHOOK_SECRET_HASH")
 
-# CORS Gateway Whitelist Origins
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-]
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
