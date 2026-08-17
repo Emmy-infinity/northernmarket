@@ -13,7 +13,8 @@ from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
-from .models import Note, SensorReading, Photo, StockMarketReading, Product, PaymentTransaction
+# Import SiteConfiguration as well
+from .models import Note, SensorReading, Photo, StockMarketReading, Product, PaymentTransaction, SiteConfiguration
 from .serializers import (
     SensorReadingSerializer,
     UserSerializer,
@@ -115,7 +116,12 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        fixed_fee = 20000.00
+        # --- FEE FROM SITE CONFIGURATION (with fallback) ---
+        try:
+            config = SiteConfiguration.objects.first()
+            fee = config.promotion_fee if config else 20000.00
+        except Exception:
+            fee = 20000.00  # fallback if table doesn't exist
 
         try:
             product = Product.objects.get(id=product_id, seller=request.user)
@@ -125,7 +131,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         unique_ref = f"FLW-UG-{uuid.uuid4().hex[:8].upper()}"
         transaction = PaymentTransaction.objects.create(
             product=product,
-            amount=fixed_fee,
+            amount=fee,                     # ← Use config fee
             phone_number=phone,
             tx_ref=unique_ref,
             status='PENDING'
@@ -140,7 +146,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             flw_payload = {
                 "phone_number": phone,
                 "network": network,
-                "amount": str(fixed_fee),
+                "amount": str(fee),          # ← Use config fee
                 "currency": "UGX",
                 "email": request.user.email,
                 "tx_ref": unique_ref,
@@ -159,7 +165,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             flw_payload = {
                 "phone_number": phone,
                 "network": network,
-                "amount": str(fixed_fee),
+                "amount": str(fee),          # ← Use config fee
                 "currency": "UGX",
                 "email": request.user.email,
                 "tx_ref": unique_ref,
@@ -308,7 +314,7 @@ class TestPaymentView(APIView):
 
 
 # =====================================================================
-# 📝 NOTE, USER, CHART, IMAGE VIEWS (unchanged – included for completeness)
+# 📝 NOTE, USER, CHART, IMAGE VIEWS
 # =====================================================================
 class NoteListCreate(generics.ListCreateAPIView):
     serializer_class = NoteSerializer
