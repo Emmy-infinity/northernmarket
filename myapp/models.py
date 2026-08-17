@@ -157,3 +157,29 @@ class StockMarketReading(models.Model):
 
     def __str__(self):
         return f"{self.timestamp}: {self.value1} / {self.value2}"
+
+
+
+# models.py – add at the bottom
+
+class SiteConfiguration(models.Model):
+    promotion_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=20000.00,
+        help_text="Default fee for promoting a product (UGX). This is used for all products."
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Promotion Fee: UGX {self.promotion_fee}"
+
+    class Meta:
+        verbose_name = "Site Configuration"
+        verbose_name_plural = "Site Configurations"
+
+    @classmethod
+    def get_config(cls):
+        """Return the single config instance, creating a default one if it doesn't exist."""
+        config, created = cls.objects.get_or_create(id=1)
+        return config
