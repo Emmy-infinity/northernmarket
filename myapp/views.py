@@ -139,16 +139,12 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         )
 
         # Flutterwave configuration
-        # Use sandbox URL if in debug/development, else production
-        if settings.DEBUG:
-            flw_base_url = "https://api.flutterwave.com/v3"
-        else:
-            flw_base_url = "https://api.flutterwave.com/v3"
-
+        flw_base_url = "https://api.flutterwave.com/v3"
         flw_url = f"{flw_base_url}/charges?type=mobile_money_uganda"
 
+        # FIXED: Corrected setting name to match FLUTTERWAVE_SECRET_KEY
         headers = {
-            "Authorization": f"Bearer {settings.FLW_SECRET_KEY}",
+            "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
             "Content-Type": "application/json"
         }
 
@@ -160,6 +156,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             "email": request.user.email,
             "tx_ref": unique_ref,
             "fullname": f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
+            "client_ip": request.META.get('REMOTE_ADDR', '127.0.0.1'),
         }
 
         try:
@@ -168,14 +165,10 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
             # Check if the charge was successful
             if flw_response.status_code == 200 and flw_data.get("status") == "success":
-                # The charge was initiated; Flutterwave sends STK push
-                # The transaction remains PENDING until webhook confirms completion
                 print(f"✅ Mobile Money STK Push sent for {phone} ({network})")
-                # Optionally store the Flutterwave transaction ID if returned
                 transaction.transaction_id = flw_data.get("data", {}).get("id")
                 transaction.save()
             else:
-                # Payment initiation failed
                 transaction.status = 'FAILED'
                 transaction.save()
                 error_msg = flw_data.get("message", "Unknown error")
@@ -185,7 +178,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 )
 
         except requests.exceptions.RequestException as e:
-            # Network or timeout error
             transaction.status = 'FAILED'
             transaction.save()
             return Response(
@@ -193,7 +185,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
-        # Return the transaction data (excluding sensitive details)
         serializer = self.get_serializer(transaction)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -209,7 +200,9 @@ def flutterwave_payment_webhook(request):
     Verifies using the Verif-Hash header.
     """
     signature = request.headers.get('Verif-Hash')
-    if not signature or signature != settings.FLW_SECRET_HASH:
+    expected_hash = getattr(settings, 'FLUTTERWAVE_WEBHOOK_SECRET_HASH', None)
+
+    if not signature or (expected_hash and signature != expected_hash):
         return Response({"error": "Unauthorised signature handshake verification failed."}, status=401)
 
     payload = request.data
@@ -226,12 +219,10 @@ def flutterwave_payment_webhook(request):
                 tx.status = 'SUCCESSFUL'
                 tx.save()
 
-                # Optionally mark the product as featured (if that's your business logic)
                 prod = tx.product
                 prod.is_featured = True
                 prod.save()
             except PaymentTransaction.DoesNotExist:
-                # Log or ignore – the transaction may have been deleted
                 pass
 
     return Response({"status": "acknowledged"}, status=200)
