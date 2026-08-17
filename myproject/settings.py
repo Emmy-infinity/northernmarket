@@ -19,8 +19,7 @@ DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
 # ─── CORS ───────────────────────────────────────────────────────────
-# ✅ For debugging, you can temporarily allow all origins
-CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove this after testing
+CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove after testing
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -40,7 +39,6 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    # Remove global permission to allow public endpoints
 }
 
 SIMPLE_JWT = {
@@ -60,13 +58,13 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "corsheaders",  # ✅ Must be included
+    "corsheaders",
     "rest_framework",
     "myapp",
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # ✅ First
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -123,6 +121,20 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# ─── FIX: Add legacy storage settings for Cloudinary compatibility ──
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# ─── STORAGES ──────────────────────────────────────────────────────
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
 # ─── CLOUDINARY ──────────────────────────────────────────────────────
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0"),
@@ -135,15 +147,6 @@ CLOUDINARY_STORAGE = {
     'CLOUD_NAME': os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0"),
     'API_KEY': os.getenv("CLOUDINARY_API_KEY", "387833656525477"),
     'API_SECRET': os.getenv("CLOUDINARY_API_SECRET", "AmTSvrVHKiLlN2ArzFgctGx_-70"),
-}
-
-STORAGES = {
-    "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
