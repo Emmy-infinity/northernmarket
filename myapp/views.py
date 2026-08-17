@@ -3,7 +3,7 @@ import requests
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.conf import settings
-from rest_framework import generics, viewsets, permissions, status  # 🌟 FIXED: Kept right at the top for all classes!
+from rest_framework import generics, viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -13,12 +13,11 @@ from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
-# Unified local model and serializer imports
 from .models import Note, SensorReading, Photo, StockMarketReading, Product, PaymentTransaction
 from .serializers import (
-    SensorReadingSerializer, 
-    UserSerializer, 
-    NoteSerializer, 
+    SensorReadingSerializer,
+    UserSerializer,
+    NoteSerializer,
     PhotoSerializer,
     ProductSerializer,
     PaymentTransactionSerializer
@@ -43,27 +42,26 @@ class ProductFilter(django_filters.FilterSet):
 # =====================================================================
 class ProductViewSet(viewsets.ModelViewSet):
     """
-    Highly optimized database engine. Handles multi-variable processing, range slices, 
-    and text search strings directly via indexed SQL operations.
+    Optimized queryset with select_related and prefetch_related to avoid N+1 queries.
     """
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = ProductFilter
     search_fields = ['title', 'description']
-    
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        return Product.objects.all().order_by('-is_featured', '-created_at')
+        # ✅ Added select_related('seller') and prefetch_related('photos')
+        #    to reduce database round trips when serializing.
+        return Product.objects.select_related('seller') \
+                              .prefetch_related('photos') \
+                              .order_by('-is_featured', '-created_at')
 
     def perform_create(self, serializer):
-        # 1. Instantiates product model record row mapped to the active merchant session token
         product_instance = serializer.save(seller=self.request.user)
-        
-        # 2. Captures an entire array data queue of multiple files sent under the 'image' key identifier
+
         uploaded_images = self.request.FILES.getlist('image')
-        
         if uploaded_images:
             print(f"📡 Backend Multi-Media Interceptor: Processing {len(uploaded_images)} diagnostic assets simultaneously...")
             for image_file in uploaded_images:
@@ -78,9 +76,6 @@ class ProductViewSet(viewsets.ModelViewSet):
 # 📸 2. MULTI-IMAGE ASSETS FILE ROUTER VIEWSETS (URL ROUTER TARGET)
 # =====================================================================
 class PhotoViewSet(viewsets.ModelViewSet):
-    """
-    Handles uploading images via React binaries and linking them cleanly to specific products.
-    """
     queryset = Photo.objects.all()
     serializer_class = PhotoSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -103,25 +98,29 @@ class PhotoViewSet(viewsets.ModelViewSet):
 # 💳 3. SECURED UGANDA MOBILE MONEY BILLING TRANSACTION ENGINE
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
-    queryset = PaymentTransaction.objects.all().order_by('-created_at')
     serializer_class = PaymentTransactionSerializer
+
+    def get_queryset(self):
+        # ✅ Added select_related('product') to avoid extra query for product.title
+        return PaymentTransaction.objects.select_related('product') \
+                                         .order_by('-created_at')
 
     def create(self, request, *args, **kwargs):
         payload = request.data
         product_id = payload.get('product')
-        phone = payload.get('phone_number') 
-        fixed_fee = 20000.00                
-        
+        phone = payload.get('phone_number')
+        fixed_fee = 20000.00
+
         try:
             product = Product.objects.get(id=product_id, seller=request.user)
             unique_ref = f"GULU-B2B-PROMO-{uuid.uuid4().hex[:8].upper()}"
-            
+
             transaction = PaymentTransaction.objects.create(
                 product=product, amount=fixed_fee, phone_number=phone,
                 tx_ref=unique_ref, status='PENDING'
             )
-            
-            flw_url = "https://flutterwave.com"
+
+            flw_url = "https://flutterwave.com"   # ⚠️ Consider updating to actual API endpoint
             flw_headers = {
                 "Authorization": f"Bearer {settings.FLW_SECRET_KEY}",
                 "Content-Type": "application/json"
@@ -134,18 +133,18 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 "email": request.user.email,
                 "fullname": f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
             }
-            
+
             try:
                 flw_response = requests.post(flw_url, json=flw_payload, headers=flw_headers, timeout=15)
                 flw_data = flw_response.json()
-                
+
                 if flw_response.status_code == 200 and flw_data.get("status") == "success":
                     print(f"📡 STK Push notification fired successfully via Flutterwave for {phone}")
                 else:
                     transaction.status = 'FAILED'
                     transaction.save()
                     return Response({"error": flw_data.get("message", "Aggregator payment prompt rejected.")}, status=400)
-                    
+
             except requests.exceptions.RequestException:
                 transaction.status = 'FAILED'
                 transaction.save()
@@ -153,13 +152,13 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
             serializer = self.get_serializer(transaction)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
+
         except Product.DoesNotExist:
             return Response({"error": "Product assignment validation failed."}, status=404)
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny]) 
+@permission_classes([AllowAny])
 def flutterwave_payment_webhook(request):
     """
     Listens for Flutterwave's background notification when a user inputs their phone PIN.
@@ -167,27 +166,27 @@ def flutterwave_payment_webhook(request):
     signature = request.headers.get('Verif-Hash')
     if not signature or signature != settings.FLW_SECRET_HASH:
         return Response({"error": "Unauthorised signature handshake verification failed."}, status=401)
-        
+
     payload = request.data
     event = payload.get('event')
-    
+
     if event == "charge.completed":
         data = payload.get('data', {})
         tx_ref = data.get('tx_ref')
-        status_flag = data.get('status') 
-        
+        status_flag = data.get('status')
+
         if status_flag == "successful":
             try:
                 tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
                 tx.status = 'SUCCESSFUL'
                 tx.save()
-                
+
                 prod = tx.product
                 prod.is_featured = True
                 prod.save()
             except PaymentTransaction.DoesNotExist:
                 pass
-                
+
     return Response({"status": "acknowledged"}, status=200)
 
 
@@ -199,8 +198,7 @@ class NoteListCreate(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        return Note.objects.filter(author=user)
+        return Note.objects.filter(author=self.request.user)
 
     def perform_create(self, serializer):
         if serializer.is_valid():
@@ -210,13 +208,11 @@ class NoteListCreate(generics.ListCreateAPIView):
 
 
 class NoteDelete(generics.DestroyAPIView):
-    queryset = Note.objects.all()
     serializer_class = NoteSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        return Note.objects.filter(author=user)
+        return Note.objects.filter(author=self.request.user)
 
 
 class CreateUserView(generics.CreateAPIView):
@@ -294,6 +290,5 @@ class ImageListView(generics.ListAPIView):
 class ImageUploadView(generics.CreateAPIView):
     queryset = Photo.objects.all()
     serializer_class = PhotoSerializer
-    parser_classes = (MultiPartParser, FormParser)  
+    parser_classes = (MultiPartParser, FormParser)
     permission_classes = [AllowAny]
-
