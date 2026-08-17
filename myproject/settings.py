@@ -3,30 +3,42 @@ from pathlib import Path
 from datetime import timedelta
 import dj_database_url
 from dotenv import load_dotenv
-
-# ─── CLOUDINARY ──────────────────────────────────────────────────────
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 
-load_dotenv()
+# ─── Unfold Admin Compatibility Patch ─────────────────────────────────
+import sys
+import types
+from django.contrib.admin.templatetags import admin_list
 
+original_node_init = admin_list.InclusionAdminNode.__init__
+
+def tolerant_unfold_node_init(self, parser, token, *args, **kwargs):
+    try:
+        return original_node_init(self, parser, token, *args, **kwargs)
+    except TypeError:
+        return original_node_init(self, parser, *args, **kwargs)
+
+admin_list.InclusionAdminNode.__init__ = tolerant_unfold_node_init
+
+# ─── Load Environment ──────────────────────────────────────────────────
+load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ─── SECURITY ────────────────────────────────────────────────────────
+# ─── Security ────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+DEBUG = os.getenv("DEBUG", "False") == "True"          # ✅ Controlled by env
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
-# ─── CORS ───────────────────────────────────────────────────────────
-CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove after testing
-
+# ─── CORS ──────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
     "http://localhost:3000",
-    "https://northernmarket-pwa.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "https://northernmarket-pwa.onrender.com",          # Your production frontend
 ]
-
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     "accept", "accept-encoding", "authorization",
@@ -34,11 +46,14 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken", "x-requested-with",
 ]
 
-# ─── REST FRAMEWORK ─────────────────────────────────────────────────
+# ─── REST Framework ──────────────────────────────────────────────────
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
 }
 
 SIMPLE_JWT = {
@@ -46,7 +61,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
 }
 
-# ─── INSTALLED APPS ──────────────────────────────────────────────────
+# ─── Installed Apps ────────────────────────────────────────────────────
 INSTALLED_APPS = [
     'unfold',
     'unfold.contrib.filters',
@@ -60,11 +75,13 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
-    "myapp",
+    'django_filters',
+    "myapp.apps.MyappConfig",
 ]
 
+# ─── Middleware ──────────────────────────────────────────────────────
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",          # Must be first
     "django.middleware.security.SecurityMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -95,7 +112,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "myproject.wsgi.application"
 
-# ─── DATABASE ──────────────────────────────────────────────────────
+# ─── Database ──────────────────────────────────────────────────────
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}",
@@ -103,6 +120,7 @@ DATABASES = {
     )
 }
 
+# ─── Password Validation ──────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -110,32 +128,29 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# ─── Internationalization ──────────────────────────────────────────
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# ─── STATIC & MEDIA ────────────────────────────────────────────────
+# ─── Static & Media ────────────────────────────────────────────────
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ─── FIX: Add legacy storage settings for Cloudinary compatibility ──
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
-
-# ─── STORAGES ──────────────────────────────────────────────────────
+# ─── Storages (Fixed to avoid `collectstatic` errors) ─────────────
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",   # ✅ Fixed
     },
 }
 
-# ─── CLOUDINARY ──────────────────────────────────────────────────────
+# ─── Cloudinary ────────────────────────────────────────────────────
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0"),
     api_key=os.getenv("CLOUDINARY_API_KEY", "387833656525477"),
@@ -148,5 +163,12 @@ CLOUDINARY_STORAGE = {
     'API_KEY': os.getenv("CLOUDINARY_API_KEY", "387833656525477"),
     'API_SECRET': os.getenv("CLOUDINARY_API_SECRET", "AmTSvrVHKiLlN2ArzFgctGx_-70"),
 }
+
+# ─── Flutterwave ──────────────────────────────────────────────────
+FLW_SECRET_KEY = os.getenv("FLUTTERWAVE_SECRET_KEY")
+FLW_SECRET_HASH = os.getenv("FLUTTERWAVE_WEBHOOK_SECRET_HASH")
+
+# ─── Base URL (used for mock endpoints in DEBUG) ──────────────────
+BASE_URL = os.getenv("BASE_URL", "https://django-ecommerce-backend-4u8q.onrender.com")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
