@@ -1,7 +1,7 @@
 import uuid
 import requests
+import json
 from django.contrib.auth.models import User
-from django.utils import timezone
 from django.conf import settings
 from rest_framework import generics, viewsets, permissions, status
 from rest_framework.views import APIView
@@ -24,7 +24,7 @@ from .serializers import (
 )
 
 # =====================================================================
-# 🎛️ MULTIVARIABLE FILTERS SCHEMAS
+# 🎛️ FILTERS
 # =====================================================================
 class ProductFilter(django_filters.FilterSet):
     min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
@@ -38,12 +38,9 @@ class ProductFilter(django_filters.FilterSet):
 
 
 # =====================================================================
-# 🏪 1. PRIMARY PLATFORM MARKETPLACE STOCK VIEWSETS
+# 🏪 PRODUCT VIEWSET
 # =====================================================================
 class ProductViewSet(viewsets.ModelViewSet):
-    """
-    Optimised queryset with select_related and prefetch_related to avoid N+1 queries.
-    """
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     filter_backends = [DjangoFilterBackend, SearchFilter]
@@ -58,20 +55,13 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         product_instance = serializer.save(seller=self.request.user)
-
         uploaded_images = self.request.FILES.getlist('image')
-        if uploaded_images:
-            print(f"📡 Backend Multi-Media Interceptor: Processing {len(uploaded_images)} diagnostic assets simultaneously...")
-            for image_file in uploaded_images:
-                Photo.objects.create(
-                    product=product_instance,
-                    image=image_file
-                )
-            print("🎉 Success - All multi-photo presentation frames saved and anchored into the database schema!")
+        for image_file in uploaded_images:
+            Photo.objects.create(product=product_instance, image=image_file)
 
 
 # =====================================================================
-# 📸 2. MULTI-IMAGE ASSETS FILE ROUTER VIEWSETS (URL ROUTER TARGET)
+# 📸 PHOTO VIEWSET
 # =====================================================================
 class PhotoViewSet(viewsets.ModelViewSet):
     queryset = Photo.objects.all()
@@ -93,7 +83,7 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 💳 3. SECURED UGANDA MOBILE MONEY BILLING ENGINE (MTN & AIRTEL)
+# 💳 FLUTTERWAVE MOBILE MONEY PAYMENT (UGANDA)
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
@@ -104,32 +94,35 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """
-        Initiates a mobile money payment via Flutterwave (Uganda).
-        Expects: product, phone_number, network (MTN or AIRTEL)
+        Initiate Flutterwave mobile money charge (MTN/AIRTEL Uganda).
         """
         payload = request.data
         product_id = payload.get('product')
         phone = payload.get('phone_number')
-        network = payload.get('network', 'MTN').upper()  # "MTN" or "AIRTEL"
+        network = payload.get('network', 'MTN').upper()
 
-        # Validate network
         if network not in ['MTN', 'AIRTEL']:
             return Response(
                 {"error": "Network must be 'MTN' or 'AIRTEL'."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        fixed_fee = 20000.00  # Your promotional fee
+        # Check for API key
+        flw_secret = getattr(settings, 'FLW_SECRET_KEY', None)
+        if not flw_secret and not settings.DEBUG:
+            return Response(
+                {"error": "Flutterwave secret key not configured."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        fixed_fee = 20000.00
 
         try:
             product = Product.objects.get(id=product_id, seller=request.user)
         except Product.DoesNotExist:
             return Response({"error": "Product not found or you don't own it."}, status=404)
 
-        # Generate a unique transaction reference
-        unique_ref = f"GULU-B2B-PROMO-{uuid.uuid4().hex[:8].upper()}"
-
-        # Create a pending transaction record
+        unique_ref = f"FLW-UG-{uuid.uuid4().hex[:8].upper()}"
         transaction = PaymentTransaction.objects.create(
             product=product,
             amount=fixed_fee,
@@ -138,40 +131,54 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             status='PENDING'
         )
 
-        # Flutterwave configuration
-        flw_base_url = "https://api.flutterwave.com/v3"
-        flw_url = f"{flw_base_url}/charges?type=mobile_money_uganda"
-
-        # FIXED: Corrected setting name to match FLUTTERWAVE_SECRET_KEY
-        headers = {
-            "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
-            "Content-Type": "application/json"
-        }
-
-        flw_payload = {
-            "phone_number": phone,
-            "network": network,
-            "amount": str(fixed_fee),
-            "currency": "UGX",
-            "email": request.user.email,
-            "tx_ref": unique_ref,
-            "fullname": f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
-            "client_ip": request.META.get('REMOTE_ADDR', '127.0.0.1'),
-        }
+        # ----------------------------------------------------------------
+        # 🔧 SANDBOX MODE: Use mock when DEBUG=True
+        # ----------------------------------------------------------------
+        if settings.DEBUG:
+            flw_url = f"{settings.BASE_URL}/mock-flutterwave/"
+            # We'll use a mock payload; the mock endpoint will ignore it.
+            flw_payload = {
+                "phone_number": phone,
+                "network": network,
+                "amount": str(fixed_fee),
+                "currency": "UGX",
+                "email": request.user.email,
+                "tx_ref": unique_ref,
+                "fullname": request.user.get_full_name() or request.user.username,
+                "country": "UG"
+            }
+            headers = {"Content-Type": "application/json"}
+            print(f"🧪 SANDBOX: Using mock Flutterwave endpoint")
+        else:
+            # Production: real Flutterwave
+            flw_url = "https://api.flutterwave.com/v3/charges?type=mobile_money_uganda"
+            headers = {
+                "Authorization": f"Bearer {flw_secret}",
+                "Content-Type": "application/json"
+            }
+            flw_payload = {
+                "phone_number": phone,
+                "network": network,
+                "amount": str(fixed_fee),
+                "currency": "UGX",
+                "email": request.user.email,
+                "tx_ref": unique_ref,
+                "fullname": request.user.get_full_name() or request.user.username,
+                "country": "UG"
+            }
 
         try:
-            flw_response = requests.post(flw_url, json=flw_payload, headers=headers, timeout=15)
-            flw_data = flw_response.json()
+            response = requests.post(flw_url, json=flw_payload, headers=headers, timeout=15)
+            data = response.json()
 
-            # Check if the charge was successful
-            if flw_response.status_code == 200 and flw_data.get("status") == "success":
-                print(f"✅ Mobile Money STK Push sent for {phone} ({network})")
-                transaction.transaction_id = flw_data.get("data", {}).get("id")
+            if response.status_code in [200, 201] and data.get("status") == "success":
+                print(f"✅ Flutterwave charge initiated for {phone} ({network})")
+                transaction.transaction_id = data.get("data", {}).get("id")
                 transaction.save()
             else:
                 transaction.status = 'FAILED'
                 transaction.save()
-                error_msg = flw_data.get("message", "Unknown error")
+                error_msg = data.get("message", "Unknown error")
                 return Response(
                     {"error": f"Payment initiation failed: {error_msg}"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -184,26 +191,34 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 {"error": f"Payment gateway error: {str(e)}"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
+        except Exception as e:
+            transaction.status = 'FAILED'
+            transaction.save()
+            return Response(
+                {"error": f"Unexpected error: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         serializer = self.get_serializer(transaction)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 # =====================================================================
-# 📡 FLUTTERWAVE WEBHOOK (for final status updates)
+# 📡 FLUTTERWAVE WEBHOOK (Charge Completed)
 # =====================================================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def flutterwave_payment_webhook(request):
+def flutterwave_webhook(request):
     """
-    Listens for Flutterwave's background notifications when a user completes payment.
-    Verifies using the Verif-Hash header.
+    Flutterwave webhook for charge.completed events.
+    Verifies signature using Verif-Hash header.
     """
+    # Verify signature
     signature = request.headers.get('Verif-Hash')
-    expected_hash = getattr(settings, 'FLUTTERWAVE_WEBHOOK_SECRET_HASH', None)
-
-    if not signature or (expected_hash and signature != expected_hash):
-        return Response({"error": "Unauthorised signature handshake verification failed."}, status=401)
+    expected = getattr(settings, 'FLW_SECRET_HASH', None)
+    if not signature or signature != expected:
+        print("⚠️ Invalid or missing Verif-Hash")
+        return Response({"error": "Unauthorised"}, status=401)
 
     payload = request.data
     event = payload.get('event')
@@ -213,23 +228,87 @@ def flutterwave_payment_webhook(request):
         tx_ref = data.get('tx_ref')
         status_flag = data.get('status')
 
-        if status_flag == "successful":
+        if status_flag == "successful" and tx_ref:
             try:
                 tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
                 tx.status = 'SUCCESSFUL'
                 tx.save()
-
-                prod = tx.product
-                prod.is_featured = True
-                prod.save()
+                # Mark product as featured
+                tx.product.is_featured = True
+                tx.product.save()
+                print(f"✅ Transaction {tx_ref} marked successful.")
             except PaymentTransaction.DoesNotExist:
-                pass
+                print(f"⚠️ Transaction {tx_ref} not found.")
+    else:
+        print(f"ℹ️ Ignored event: {event}")
 
     return Response({"status": "acknowledged"}, status=200)
 
 
 # =====================================================================
-# 📝 4. TRADER NOTE AND SECURITY ACCESS EXTENSION CHANNELS
+# 🧪 MOCK FLUTTERWAVE SANDBOX (for testing without real key)
+# =====================================================================
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def mock_flutterwave(request):
+    """
+    Mock Flutterwave charge endpoint – always returns success.
+    Only available when DEBUG=True.
+    """
+    if not settings.DEBUG:
+        return Response({"error": "Mock only in DEBUG"}, status=404)
+
+    payload = request.data
+    tx_ref = payload.get('tx_ref', 'MOCK-REF-001')
+    print(f"🧪 Mock Flutterwave called for tx_ref: {tx_ref}")
+
+    return Response({
+        "status": "success",
+        "message": "Charge initiated (MOCK)",
+        "data": {
+            "id": 123456,
+            "tx_ref": tx_ref,
+            "flw_ref": "FLW-MOCK-001",
+            "amount": payload.get('amount'),
+            "charged_amount": payload.get('amount'),
+            "status": "pending"
+        }
+    }, status=200)
+
+
+# =====================================================================
+# 🔧 TEST PAYMENT CONFIRMATION (Manual webhook simulation)
+# =====================================================================
+class TestPaymentView(APIView):
+    """
+    Manually mark a transaction as successful (for testing).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not settings.DEBUG:
+            return Response({"error": "Test endpoint only in DEBUG"}, status=404)
+
+        tx_ref = request.data.get('tx_ref')
+        if not tx_ref:
+            return Response({"error": "tx_ref required"}, status=400)
+
+        try:
+            tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            tx.status = 'SUCCESSFUL'
+            tx.save()
+            tx.product.is_featured = True
+            tx.product.save()
+            return Response({
+                "status": "success",
+                "message": f"Transaction {tx_ref} marked successful"
+            })
+        except PaymentTransaction.DoesNotExist:
+            return Response({"error": "Transaction not found"}, status=404)
+
+
+# =====================================================================
+# 📝 NOTE, USER, CHART, IMAGE VIEWS (unchanged – included for completeness)
 # =====================================================================
 class NoteListCreate(generics.ListCreateAPIView):
     serializer_class = NoteSerializer
@@ -259,9 +338,6 @@ class CreateUserView(generics.CreateAPIView):
     permission_classes = [AllowAny]
 
 
-# =====================================================================
-# 📊 5. LOGISTICS PLOTLY GRAPH READINGS & HARDWARE SENSORS LOGS
-# =====================================================================
 class ChartDataView2(APIView):
     def get(self, request):
         readings = StockMarketReading.objects.all().order_by('timestamp')
@@ -270,26 +346,10 @@ class ChartDataView2(APIView):
         y2 = [r.value2 for r in readings]
         chart_data = {
             "data": [
-                {
-                    "x": x,
-                    "y": y1,
-                    "type": "scatter",
-                    "mode": "lines+markers",
-                    "name": "Stock Value 1",
-                },
-                {
-                    "x": x,
-                    "y": y2,
-                    "type": "scatter",
-                    "mode": "lines+markers",
-                    "name": "Stock Value 2",
-                }
+                {"x": x, "y": y1, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 1"},
+                {"x": x, "y": y2, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 2"}
             ],
-            "layout": {
-                "title": "Stock Market Reading",
-                "xaxis": {"title": "Time"},
-                "yaxis": {"title": "Value"},
-            }
+            "layout": {"title": "Stock Market Reading", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
         }
         return Response(chart_data)
 
@@ -299,22 +359,9 @@ class ChartDataView(APIView):
         readings = SensorReading.objects.all().order_by('timestamp')
         x = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
         y = [r.value for r in readings]
-
         chart_data = {
-            "data": [
-                {
-                    "x": x,
-                    "y": y,
-                    "type": "scatter",
-                    "mode": "lines+markers",
-                    "name": "Sensor",
-                }
-            ],
-            "layout": {
-                "title": "Sensor Data",
-                "xaxis": {"title": "Time"},
-                "yaxis": {"title": "Value"},
-            }
+            "data": [{"x": x, "y": y, "type": "scatter", "mode": "lines+markers", "name": "Sensor"}],
+            "layout": {"title": "Sensor Data", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
         }
         return Response(chart_data)
 
