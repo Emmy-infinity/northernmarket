@@ -1,5 +1,6 @@
 import uuid
 import requests
+import xml.etree.ElementTree as ET
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.conf import settings
@@ -93,7 +94,7 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 💳 3. SECURED UGANDA MOBILE MONEY BILLING ENGINE (MTN & AIRTEL)
+# 💳 3. YO! PAYMENTS UGANDA MOBILE MONEY BILLING ENGINE
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
@@ -104,7 +105,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """
-        Initiates a mobile money payment via Flutterwave (Uganda).
+        Initiates a mobile money payment via Yo! Payments (Uganda).
         Expects: product, phone_number, network (MTN or AIRTEL)
         """
         payload = request.data
@@ -119,7 +120,18 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        fixed_fee = 20000.00  # Your promotional fee
+        # Check that required settings are present (only for production)
+        yo_username = getattr(settings, 'YO_API_USERNAME', None)
+        yo_password = getattr(settings, 'YO_API_PASSWORD', None)
+        
+        # In sandbox mode, we can skip credential check
+        if not settings.DEBUG and (not yo_username or not yo_password):
+            return Response(
+                {"error": "Yo! Payments API credentials not configured."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        fixed_fee = 20000.00  # Promotional fee in UGX
 
         try:
             product = Product.objects.get(id=product_id, seller=request.user)
@@ -127,7 +139,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             return Response({"error": "Product not found or you don't own it."}, status=404)
 
         # Generate a unique transaction reference
-        unique_ref = f"GULU-B2B-PROMO-{uuid.uuid4().hex[:8].upper()}"
+        unique_ref = f"GULU-YOPAY-{uuid.uuid4().hex[:8].upper()}"
 
         # Create a pending transaction record
         transaction = PaymentTransaction.objects.create(
@@ -138,103 +150,234 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             status='PENDING'
         )
 
-        # Flutterwave configuration
-        # Use sandbox URL if in debug/development, else production
+        # ================================================================
+        # 🔧 SANDBOX MODE: Use mock endpoint when DEBUG=True
+        # ================================================================
         if settings.DEBUG:
-            flw_base_url = "https://api.flutterwave.com/v3"
+            # Use the mock endpoint for testing without real credentials
+            yo_url = f"{settings.BASE_URL}/mock-yo-payments/"
+            xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?>
+<AutoCreate>
+    <Request>
+        <APIUsername>mock_username</APIUsername>
+        <APIPassword>mock_password</APIPassword>
+        <Method>acdepositfunds</Method>
+        <NonBlocking>TRUE</NonBlocking>
+        <Account>{phone}</Account>
+        <Amount>{int(fixed_fee)}</Amount>
+        <Currency>UGX</Currency>
+        <ExternalReference>{unique_ref}</ExternalReference>
+        <Narrative>B2B Promo Fee for Product #{product.id}</Narrative>
+    </Request>
+</AutoCreate>"""
+            print(f"🧪 SANDBOX MODE: Using mock Yo! Payments endpoint")
         else:
-            flw_base_url = "https://api.flutterwave.com/v3"
+            # Production: Use real Yo! Payments endpoints
+            yo_url = "https://paymentsapi1.yo.co.ug/ybs/task.php"
+            narrative = f"B2B Promo Fee for Product #{product.id}"
+            xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?>
+<AutoCreate>
+    <Request>
+        <APIUsername>{yo_username}</APIUsername>
+        <APIPassword>{yo_password}</APIPassword>
+        <Method>acdepositfunds</Method>
+        <NonBlocking>TRUE</NonBlocking>
+        <Account>{phone}</Account>
+        <Amount>{int(fixed_fee)}</Amount>
+        <Currency>UGX</Currency>
+        <ExternalReference>{unique_ref}</ExternalReference>
+        <Narrative>{narrative}</Narrative>
+    </Request>
+</AutoCreate>"""
 
-        flw_url = f"{flw_base_url}/charges?type=mobile_money_uganda"
-
-        headers = {
-            "Authorization": f"Bearer {settings.FLW_SECRET_KEY}",
-            "Content-Type": "application/json"
-        }
-
-        flw_payload = {
-            "phone_number": phone,
-            "network": network,
-            "amount": str(fixed_fee),
-            "currency": "UGX",
-            "email": request.user.email,
-            "tx_ref": unique_ref,
-            "fullname": f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
-        }
+        headers = {"Content-Type": "text/xml"}
 
         try:
-            flw_response = requests.post(flw_url, json=flw_payload, headers=headers, timeout=15)
-            flw_data = flw_response.json()
-
-            # Check if the charge was successful
-            if flw_response.status_code == 200 and flw_data.get("status") == "success":
-                # The charge was initiated; Flutterwave sends STK push
-                # The transaction remains PENDING until webhook confirms completion
-                print(f"✅ Mobile Money STK Push sent for {phone} ({network})")
-                # Optionally store the Flutterwave transaction ID if returned
-                transaction.transaction_id = flw_data.get("data", {}).get("id")
-                transaction.save()
+            response = requests.post(yo_url, data=xml_payload, headers=headers, timeout=20)
+            
+            # For mock endpoint, response will be XML
+            # For real endpoint, response will also be XML
+            if response.status_code == 200:
+                try:
+                    root = ET.fromstring(response.text)
+                    status_element = root.find('.//Status')
+                    if status_element is not None and status_element.text == 'OK':
+                        print(f"✅ Payment initiated successfully for {phone} ({network})")
+                        transaction.save()
+                    else:
+                        error_msg = root.find('.//Message')
+                        error_text = error_msg.text if error_msg is not None else "Unknown error"
+                        transaction.status = 'FAILED'
+                        transaction.save()
+                        return Response(
+                            {"error": f"Yo! Payments initiation failed: {error_text}"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                except ET.ParseError:
+                    if "OK" in response.text or "SUCCEEDED" in response.text:
+                        print(f"✅ Payment initiated successfully for {phone} ({network})")
+                        transaction.save()
+                    else:
+                        transaction.status = 'FAILED'
+                        transaction.save()
+                        return Response(
+                            {"error": f"Yo! Payments initiation failed: {response.text[:100]}"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
             else:
-                # Payment initiation failed
                 transaction.status = 'FAILED'
                 transaction.save()
-                error_msg = flw_data.get("message", "Unknown error")
                 return Response(
-                    {"error": f"Payment initiation failed: {error_msg}"},
+                    {"error": f"Yo! Payments API returned status {response.status_code}"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
         except requests.exceptions.RequestException as e:
-            # Network or timeout error
             transaction.status = 'FAILED'
             transaction.save()
             return Response(
                 {"error": f"Payment gateway error: {str(e)}"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
+        except Exception as e:
+            transaction.status = 'FAILED'
+            transaction.save()
+            return Response(
+                {"error": f"Unexpected error: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        # Return the transaction data (excluding sensitive details)
         serializer = self.get_serializer(transaction)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 # =====================================================================
-# 📡 FLUTTERWAVE WEBHOOK (for final status updates)
+# 📡 YO! PAYMENTS INSTANT PAYMENT NOTIFICATION (IPN) WEBHOOK
 # =====================================================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def flutterwave_payment_webhook(request):
+def yo_payments_webhook(request):
     """
-    Listens for Flutterwave's background notifications when a user completes payment.
-    Verifies using the Verif-Hash header.
+    Listens for Yo! Payments IPN callbacks when a subscriber completes payment.
+    Handles both form-encoded and JSON payloads.
     """
-    signature = request.headers.get('Verif-Hash')
-    if not signature or signature != settings.FLW_SECRET_HASH:
-        return Response({"error": "Unauthorised signature handshake verification failed."}, status=401)
+    # Handle form-encoded data (Yo! Payments default)
+    if request.content_type == 'application/x-www-form-urlencoded':
+        payload = request.POST.dict()
+    else:
+        payload = request.data
 
-    payload = request.data
-    event = payload.get('event')
+    # Extract transaction reference (handles multiple naming conventions)
+    tx_ref = (
+        payload.get('external_reference') or 
+        payload.get('ExternalReference') or 
+        payload.get('private_transaction_reference') or 
+        payload.get('transaction_reference')
+    )
+    
+    # Extract status
+    status_flag = (
+        payload.get('status') or 
+        payload.get('transaction_status') or 
+        payload.get('Status') or
+        payload.get('TransactionStatus')
+    )
 
-    if event == "charge.completed":
-        data = payload.get('data', {})
-        tx_ref = data.get('tx_ref')
-        status_flag = data.get('status')
+    print(f"📡 Yo! Payments IPN received: tx_ref={tx_ref}, status={status_flag}")
 
-        if status_flag == "successful":
+    if tx_ref and status_flag:
+        if status_flag.upper() in ['SUCCEEDED', 'OK', 'SUCCESS']:
             try:
                 tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
                 tx.status = 'SUCCESSFUL'
                 tx.save()
-
-                # Optionally mark the product as featured (if that's your business logic)
+                
+                # Mark product as featured
                 prod = tx.product
                 prod.is_featured = True
                 prod.save()
+                print(f"✅ Transaction {tx_ref} marked as successful.")
             except PaymentTransaction.DoesNotExist:
-                # Log or ignore – the transaction may have been deleted
-                pass
+                print(f"⚠️ Transaction {tx_ref} not found.")
 
     return Response({"status": "acknowledged"}, status=200)
+
+
+# =====================================================================
+# 🧪 MOCK YO! PAYMENTS SANDBOX (For testing without credentials)
+# =====================================================================
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def mock_yo_payments(request):
+    """
+    MOCK Yo! Payments Sandbox – simulates the real Yo! Payments API.
+    Only active when DEBUG=True.
+    """
+    if not settings.DEBUG:
+        return Response({"error": "Mock endpoint only available in DEBUG mode"}, status=404)
+    
+    # Parse XML payload
+    xml_data = request.body.decode('utf-8')
+    print(f"🧪 Mock Yo! Payments received: {xml_data[:200]}...")
+    
+    # Extract external reference from XML
+    import re
+    match = re.search(r'<ExternalReference>(.*?)</ExternalReference>', xml_data)
+    tx_ref = match.group(1) if match else "MOCK-REF-001"
+    
+    # Return success response
+    response_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<AutoCreate>
+    <Response>
+        <Status>OK</Status>
+        <StatusCode>1</StatusCode>
+        <TransactionStatus>PENDING</TransactionStatus>
+        <TransactionReference>MOCK-TX-{uuid.uuid4().hex[:8]}</TransactionReference>
+        <ExternalReference>{tx_ref}</ExternalReference>
+        <Message>Transaction initiated successfully (MOCK)</Message>
+    </Response>
+</AutoCreate>"""
+    
+    return Response(response_xml, content_type='text/xml', status=200)
+
+
+# =====================================================================
+# 🔧 TEST PAYMENT CONFIRMATION (Manual webhook simulation)
+# =====================================================================
+class TestPaymentView(APIView):
+    """
+    MANUAL TEST ENDPOINT: Simulates a successful Yo! Payments transaction.
+    Only use in development/sandbox!
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not settings.DEBUG:
+            return Response({"error": "Test endpoint only available in DEBUG mode"}, status=404)
+        
+        tx_ref = request.data.get('tx_ref')
+        
+        if not tx_ref:
+            return Response({"error": "tx_ref required"}, status=400)
+        
+        try:
+            tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            tx.status = 'SUCCESSFUL'
+            tx.save()
+            
+            prod = tx.product
+            prod.is_featured = True
+            prod.save()
+            
+            return Response({
+                "status": "success",
+                "message": f"Transaction {tx_ref} marked as successful",
+                "product": prod.title,
+                "is_featured": prod.is_featured
+            })
+            
+        except PaymentTransaction.DoesNotExist:
+            return Response({"error": "Transaction not found"}, status=404)
 
 
 # =====================================================================
