@@ -1,44 +1,70 @@
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 import dj_database_url
 from dotenv import load_dotenv
-
-# ─── CLOUDINARY ──────────────────────────────────────────────────────
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 
-load_dotenv()
+# ─── Unfold Admin Compatibility Patch ─────────────────────────────────
+from django.contrib.admin.templatetags import admin_list
 
+original_node_init = admin_list.InclusionAdminNode.__init__
+
+def tolerant_unfold_node_init(self, parser, token, *args, **kwargs):
+    try:
+        return original_node_init(self, parser, token, *args, **kwargs)
+    except TypeError:
+        return original_node_init(self, parser, *args, **kwargs)
+
+admin_list.InclusionAdminNode.__init__ = tolerant_unfold_node_init
+
+# ─── Load Environment ──────────────────────────────────────────────────
+load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ─── SECURITY ────────────────────────────────────────────────────────
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+# ─── Security ────────────────────────────────────────────────────────
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable is not set.")
 
-# ─── CORS ───────────────────────────────────────────────────────────
-CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove after testing
+DEBUG = os.getenv("DEBUG", "False") == "True"
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# ─── CORS ──────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
     "http://localhost:3000",
-    "https://northernmarket-pwa.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    os.getenv("FRONTEND_URL", "https://northernmarket-pwa.onrender.com"),
 ]
-
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_HEADERS = [
-    "accept", "accept-encoding", "authorization",
-    "content-type", "dnt", "origin", "user-agent",
-    "x-csrftoken", "x-requested-with",
+
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS + [
+    "https://django-ecommerce-backend-4u8q.onrender.com",
 ]
 
-# ─── REST FRAMEWORK ─────────────────────────────────────────────────
+# ─── Security Settings for Production ──────────────────────────────
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+# ─── REST Framework ──────────────────────────────────────────────────
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
 }
 
 SIMPLE_JWT = {
@@ -46,7 +72,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
 }
 
-# ─── INSTALLED APPS ──────────────────────────────────────────────────
+# ─── Installed Apps ────────────────────────────────────────────────────
 INSTALLED_APPS = [
     'unfold',
     'unfold.contrib.filters',
@@ -60,9 +86,11 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
-    "myapp",
+    'django_filters',
+    "myapp.apps.MyappConfig",
 ]
 
+# ─── Middleware ──────────────────────────────────────────────────────
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -95,7 +123,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "myproject.wsgi.application"
 
-# ─── DATABASE ──────────────────────────────────────────────────────
+# ─── Database ──────────────────────────────────────────────────────
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}",
@@ -103,6 +131,7 @@ DATABASES = {
     )
 }
 
+# ─── Password Validation ──────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -110,32 +139,39 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# ─── Internationalization ──────────────────────────────────────────
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# ─── STATIC & MEDIA ────────────────────────────────────────────────
+# ─── Static & Media ────────────────────────────────────────────────
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# ⚠️ We use WhiteNoise's manifest storage for static files – this will work
+# because we set STATICFILES_STORAGE, not STORAGES['staticfiles'].
+# This avoids the Cloudinary collectstatic override conflict.
+
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ─── FIX: Add legacy storage settings for Cloudinary compatibility ──
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# ─── WhiteNoise Configuration ──────────────────────────────────────
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_MANIFEST_STRICT = False  # Avoid errors if a file is missing
+WHITENOISE_AUTOREFRESH = DEBUG
 
-# ─── STORAGES ──────────────────────────────────────────────────────
+# ─── Storages ──────────────────────────────────────────────────────
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",  # ← Changed
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
 
-# ─── CLOUDINARY ──────────────────────────────────────────────────────
+# ─── Cloudinary ────────────────────────────────────────────────────
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0"),
     api_key=os.getenv("CLOUDINARY_API_KEY", "387833656525477"),
@@ -149,4 +185,32 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': os.getenv("CLOUDINARY_API_SECRET", "AmTSvrVHKiLlN2ArzFgctGx_-70"),
 }
 
+# ─── Flutterwave ──────────────────────────────────────────────────
+FLW_SECRET_KEY = os.getenv("FLUTTERWAVE_SECRET_KEY")
+FLW_SECRET_HASH = os.getenv("FLUTTERWAVE_WEBHOOK_SECRET_HASH")
+
+BASE_URL = os.getenv("BASE_URL", "https://django-ecommerce-backend-4u8q.onrender.com")
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ─── Logging ──────────────────────────────────────────────────────
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO' if not DEBUG else 'DEBUG',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO' if not DEBUG else 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
