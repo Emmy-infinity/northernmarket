@@ -1,9 +1,10 @@
-import sys
+# import sys  <-- ❌ REMOVED (unused)
+
 from django.db import models
 from django.contrib.auth import get_user_model
 from cloudinary.models import CloudinaryField
 from django.utils import timezone
-from django.db.models.signals import post_save # 🧠 Essential for profile automation
+from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 User = get_user_model()
@@ -19,15 +20,10 @@ class UserProfile(models.Model):
     def __str__(self):
         return f"Profile for {self.user.username}"
 
-# Automatically instantiate or update a user's contact profile whenever an account is built
+# ✅ OPTIMIZED: Simplified signal using get_or_create (removes redundant try/except)
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
-    if created:
-        UserProfile.objects.create(user=instance)
-    try:
-        instance.profile.save()
-    except UserProfile.DoesNotExist:
-        UserProfile.objects.create(user=instance)
+    UserProfile.objects.get_or_create(user=instance)
 
 
 # =====================================================================
@@ -53,15 +49,15 @@ class Product(models.Model):
     description = models.TextField()
     
     # Financials & Inventory
-    price = models.DecimalField(max_digits=12, decimal_places=2) # Supports millions of UGX safely
-    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED')
+    price = models.DecimalField(max_digits=12, decimal_places=2, db_index=True)  # ✅ Added index
+    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED', db_index=True)  # ✅ Added index
     stock_count = models.PositiveIntegerField(default=1)
     
     # Logistics
-    item_location = models.CharField(max_length=10, choices=LOCATION_CHOICES, default='GULU')
+    item_location = models.CharField(max_length=10, choices=LOCATION_CHOICES, default='GULU', db_index=True)  # ✅ Added index
     seller_location_details = models.CharField(max_length=255, help_text="e.g., Near Gulu University Main Gate")
     
-    # 🌟 NEW INFRASTRUCTURE FIELD NODES FOR LOGISTICS & INQUIRIES
+    # Infrastructure fields
     weight = models.DecimalField(
         max_digits=6, 
         decimal_places=2, 
@@ -75,15 +71,25 @@ class Product(models.Model):
         help_text="Direct phone number for item inquiries (e.g., 256770000000)"
     )
     
-    # Restored Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)  # ✅ Added index
 
     # B2B Premium Ranking Fields
     is_featured = models.BooleanField(default=False, db_index=True)
     featured_until = models.DateTimeField(null=True, blank=True, db_index=True)
 
+    # ✅ OPTIMIZED: Added Meta for default ordering and explicit indexes
+    class Meta:
+        ordering = ['-created_at']  # Newest products first by default
+        indexes = [
+            models.Index(fields=['price']),
+            models.Index(fields=['condition']),
+            models.Index(fields=['item_location']),
+            models.Index(fields=['created_at']),
+        ]
+
     def save(self, *args, **kwargs):
-        # Auto-expire the premium ranking if the duration lapses past today
+        # Auto-expire featured status
         if self.featured_until and self.featured_until < timezone.now():
             self.is_featured = False
             self.featured_until = None
@@ -110,12 +116,17 @@ class PaymentTransaction(models.Model):
     ]
 
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='payments')
-    amount = models.DecimalField(max_digits=10, decimal_places=2) 
+    # ✅ OPTIMIZED: Increased max_digits from 10 → 12 to safely match Product.price
+    amount = models.DecimalField(max_digits=12, decimal_places=2)  
     phone_number = models.CharField(max_length=15) 
     tx_ref = models.CharField(max_length=100, unique=True) 
     transaction_id = models.CharField(max_length=100, blank=True, null=True) 
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # ✅ OPTIMIZED: Added Meta for default ordering
+    class Meta:
+        ordering = ['-created_at']
 
     def __str__(self):
         return f"TX: {self.tx_ref} - {self.status}"
