@@ -1,26 +1,31 @@
-# Open your local project ──> myapp/urls.py
-
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
 
-# 🚀 INITIALIZE THE AUTOMATED REST ROUTER
 router = DefaultRouter()
 router.register(r'products', views.ProductViewSet, basename='product')
 router.register(r'photos', views.PhotoViewSet, basename='photo')
 router.register(r'payments', views.PaymentTransactionViewSet, basename='payment')
 
 urlpatterns = [
-    # 🌟 1. STANDALONE SECURE FLUTTERWAVE WEBHOOK
-    path('payments/webhook/', views.flutterwave_payment_webhook, name='flw_webhook'),
-    
-    # 🌟 2. PRESERVED LEGACY & SENSOR ENDPOINTS
+    # ─── FLUTTERWAVE WEBHOOK ──────────────────────────────────────────
+    path('payments/webhook/', views.flutterwave_webhook, name='flw_webhook'),
+
+    # ─── MOCK FLUTTERWAVE (DEBUG only) ────────────────────────────────
+    path('mock-flutterwave/', views.mock_flutterwave, name='mock_flutterwave'),
+
+    # ─── TEST PAYMENT CONFIRMATION (DEBUG only) ──────────────────────
+    path('test-payment/', views.TestPaymentView.as_view(), name='test-payment'),
+
+    # ─── LEGACY ENDPOINTS ──────────────────────────────────────────────
     path("notes/", views.NoteListCreate.as_view(), name="note-list"),
     path("notes/delete/<int:pk>/", views.NoteDelete.as_view(), name="note-delete"),
     path('sensor_reading/', views.ChartDataView.as_view(), name="sensor-reading"),
     path('charts/stocks/', views.ChartDataView2.as_view(), name='stock-chart'),
+    path('images/', views.ImageListView.as_view(), name='image-list'),
+    path('upload/', views.ImageUploadView.as_view(), name='image-upload'),
+    path('register/', views.CreateUserView.as_view(), name='register'),
 
-    # 🌟 3. AUTOMATED VIEWSET NETWORKS (Appended cleanly at the bottom)
-    # This automatically includes paths for your products, payments, and photos!
+    # ─── VIEWSET ROUTES ────────────────────────────────────────────────
     path('', include(router.urls)),
 ]
