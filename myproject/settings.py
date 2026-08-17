@@ -18,7 +18,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
-# ─── CORS ─────────────────────────────────────────────────────────────
+# ─── CORS ───────────────────────────────────────────────────────────
 # ✅ For debugging, you can temporarily allow all origins
 CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove this after testing
 
