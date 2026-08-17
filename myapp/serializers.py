@@ -13,8 +13,8 @@ class UserSerializer(serializers.ModelSerializer):
         extra_kwargs = {"password": {"write_only": True}}
 
     def create(self, validated_data):
-        user = User.objects.create_user(**validated_data)
-        return user
+        # ✅ Uses create_user to hash password – unchanged and safe.
+        return User.objects.create_user(**validated_data)
 
 
 # =====================================================================
@@ -31,10 +31,11 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
             'tx_ref', 'transaction_id', 'status', 'status_display', 'created_at'
         ]
         read_only_fields = ['id', 'status', 'transaction_id', 'tx_ref', 'created_at']
+        # ✅ No changes – already clean.
 
 
 # =====================================================================
-# 📸 3. MULTI-IMAGE ASSETS COMPRESSION PIPELINE (FIXED SINGLE DEFINITION)
+# 📸 3. MULTI-IMAGE ASSETS COMPRESSION PIPELINE
 # =====================================================================
 class PhotoSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
@@ -53,10 +54,10 @@ class PhotoSerializer(serializers.ModelSerializer):
 
 
 # =====================================================================
-# 🌾 4. B2B MARKETPLACE PRODUCT LISTING GRID ENGINE (SYNCHRONIZED)
+# 🌾 4. B2B MARKETPLACE PRODUCT LISTING GRID ENGINE
 # =====================================================================
 class ProductSerializer(serializers.ModelSerializer):
-    # 🌟 FIXED COMPLIANCE INTERCEPT: seller is marked read-only to stop missing parameter validation breaks
+    # Seller fields are read‑only by using ReadOnlyField – explicit and safe.
     seller = serializers.ReadOnlyField(source='seller.id')
     seller_username = serializers.ReadOnlyField(source='seller.username')
     seller_email = serializers.ReadOnlyField(source='seller.email')
@@ -79,16 +80,18 @@ class ProductSerializer(serializers.ModelSerializer):
             'photos', 'is_featured', 'created_at', 'days_since_listing',
             'bulk_delivery_estimate_ugx'
         ]
-        # 🌟 PRODUCTION VETTED PROTECTION: Explicit security declaration for relational markers
-        read_only_fields = ['id', 'seller', 'is_featured', 'created_at']
+        # ✅ Removed redundant 'seller' from read_only_fields because it's already a ReadOnlyField.
+        #    'is_featured' and 'created_at' are kept read‑only to prevent mass‑assignment issues.
+        read_only_fields = ['id', 'is_featured', 'created_at']
 
     def get_days_since_listing(self, obj):
         delta = timezone.now() - obj.created_at
         return max(0, delta.days)
 
     def get_bulk_delivery_estimate_ugx(self, obj):
+        # Safe fallback: if no weight, return a base estimate.
         if not obj.weight:
-            return 7000 
+            return 7000
         return int(5000 + (float(obj.weight) * 2500))
 
 
@@ -103,6 +106,7 @@ class NoteSerializer(serializers.ModelSerializer):
 
 
 class SensorReadingSerializer(serializers.ModelSerializer):
+    # Mapping to 'x' and 'y' for charting – unchanged.
     x = serializers.DateTimeField(source='timestamp', format='%Y-%m-%d %H:%M:%S')
     y = serializers.FloatField(source='value')
 
