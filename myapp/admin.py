@@ -30,3 +30,14 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
     form = UserChangeForm
     add_form = UserCreationForm
     change_password_form = UserChangeForm
+
+
+# admin.py
+
+from .models import SiteConfiguration
+
+@admin.register(SiteConfiguration)
+class SiteConfigurationAdmin(admin.ModelAdmin):
+    fields = ('promotion_fee',)
+    readonly_fields = ('updated_at',)
+    list_display = ('id', 'promotion_fee', 'updated_at')
