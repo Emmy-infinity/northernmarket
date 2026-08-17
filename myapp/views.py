@@ -42,7 +42,7 @@ class ProductFilter(django_filters.FilterSet):
 # =====================================================================
 class ProductViewSet(viewsets.ModelViewSet):
     """
-    Optimized queryset with select_related and prefetch_related to avoid N+1 queries.
+    Optimised queryset with select_related and prefetch_related to avoid N+1 queries.
     """
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -52,8 +52,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        # ✅ Added select_related('seller') and prefetch_related('photos')
-        #    to reduce database round trips when serializing.
         return Product.objects.select_related('seller') \
                               .prefetch_related('photos') \
                               .order_by('-is_featured', '-created_at')
@@ -95,73 +93,120 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 💳 3. SECURED UGANDA MOBILE MONEY BILLING TRANSACTION ENGINE
+# 💳 3. SECURED UGANDA MOBILE MONEY BILLING ENGINE (MTN & AIRTEL)
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
 
     def get_queryset(self):
-        # ✅ Added select_related('product') to avoid extra query for product.title
         return PaymentTransaction.objects.select_related('product') \
                                          .order_by('-created_at')
 
     def create(self, request, *args, **kwargs):
+        """
+        Initiates a mobile money payment via Flutterwave (Uganda).
+        Expects: product, phone_number, network (MTN or AIRTEL)
+        """
         payload = request.data
         product_id = payload.get('product')
         phone = payload.get('phone_number')
-        fixed_fee = 20000.00
+        network = payload.get('network', 'MTN').upper()  # "MTN" or "AIRTEL"
+
+        # Validate network
+        if network not in ['MTN', 'AIRTEL']:
+            return Response(
+                {"error": "Network must be 'MTN' or 'AIRTEL'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        fixed_fee = 20000.00  # Your promotional fee
 
         try:
             product = Product.objects.get(id=product_id, seller=request.user)
-            unique_ref = f"GULU-B2B-PROMO-{uuid.uuid4().hex[:8].upper()}"
+        except Product.DoesNotExist:
+            return Response({"error": "Product not found or you don't own it."}, status=404)
 
-            transaction = PaymentTransaction.objects.create(
-                product=product, amount=fixed_fee, phone_number=phone,
-                tx_ref=unique_ref, status='PENDING'
-            )
+        # Generate a unique transaction reference
+        unique_ref = f"GULU-B2B-PROMO-{uuid.uuid4().hex[:8].upper()}"
 
-            flw_url = "https://flutterwave.com"   # ⚠️ Consider updating to actual API endpoint
-            flw_headers = {
-                "Authorization": f"Bearer {settings.FLW_SECRET_KEY}",
-                "Content-Type": "application/json"
-            }
-            flw_payload = {
-                "tx_ref": unique_ref,
-                "amount": str(fixed_fee),
-                "currency": "UGX",
-                "phone_number": phone,
-                "email": request.user.email,
-                "fullname": f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
-            }
+        # Create a pending transaction record
+        transaction = PaymentTransaction.objects.create(
+            product=product,
+            amount=fixed_fee,
+            phone_number=phone,
+            tx_ref=unique_ref,
+            status='PENDING'
+        )
 
-            try:
-                flw_response = requests.post(flw_url, json=flw_payload, headers=flw_headers, timeout=15)
-                flw_data = flw_response.json()
+        # Flutterwave configuration
+        # Use sandbox URL if in debug/development, else production
+        if settings.DEBUG:
+            flw_base_url = "https://api.flutterwave.com/v3"
+        else:
+            flw_base_url = "https://api.flutterwave.com/v3"
 
-                if flw_response.status_code == 200 and flw_data.get("status") == "success":
-                    print(f"📡 STK Push notification fired successfully via Flutterwave for {phone}")
-                else:
-                    transaction.status = 'FAILED'
-                    transaction.save()
-                    return Response({"error": flw_data.get("message", "Aggregator payment prompt rejected.")}, status=400)
+        flw_url = f"{flw_base_url}/charges?type=mobile_money_uganda"
 
-            except requests.exceptions.RequestException:
+        headers = {
+            "Authorization": f"Bearer {settings.FLW_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        flw_payload = {
+            "phone_number": phone,
+            "network": network,
+            "amount": str(fixed_fee),
+            "currency": "UGX",
+            "email": request.user.email,
+            "tx_ref": unique_ref,
+            "fullname": f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username,
+        }
+
+        try:
+            flw_response = requests.post(flw_url, json=flw_payload, headers=headers, timeout=15)
+            flw_data = flw_response.json()
+
+            # Check if the charge was successful
+            if flw_response.status_code == 200 and flw_data.get("status") == "success":
+                # The charge was initiated; Flutterwave sends STK push
+                # The transaction remains PENDING until webhook confirms completion
+                print(f"✅ Mobile Money STK Push sent for {phone} ({network})")
+                # Optionally store the Flutterwave transaction ID if returned
+                transaction.transaction_id = flw_data.get("data", {}).get("id")
+                transaction.save()
+            else:
+                # Payment initiation failed
                 transaction.status = 'FAILED'
                 transaction.save()
-                return Response({"error": "Payment aggregator network timeout. Please retry."}, status=503)
+                error_msg = flw_data.get("message", "Unknown error")
+                return Response(
+                    {"error": f"Payment initiation failed: {error_msg}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-            serializer = self.get_serializer(transaction)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except requests.exceptions.RequestException as e:
+            # Network or timeout error
+            transaction.status = 'FAILED'
+            transaction.save()
+            return Response(
+                {"error": f"Payment gateway error: {str(e)}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
 
-        except Product.DoesNotExist:
-            return Response({"error": "Product assignment validation failed."}, status=404)
+        # Return the transaction data (excluding sensitive details)
+        serializer = self.get_serializer(transaction)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
+# =====================================================================
+# 📡 FLUTTERWAVE WEBHOOK (for final status updates)
+# =====================================================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def flutterwave_payment_webhook(request):
     """
-    Listens for Flutterwave's background notification when a user inputs their phone PIN.
+    Listens for Flutterwave's background notifications when a user completes payment.
+    Verifies using the Verif-Hash header.
     """
     signature = request.headers.get('Verif-Hash')
     if not signature or signature != settings.FLW_SECRET_HASH:
@@ -181,10 +226,12 @@ def flutterwave_payment_webhook(request):
                 tx.status = 'SUCCESSFUL'
                 tx.save()
 
+                # Optionally mark the product as featured (if that's your business logic)
                 prod = tx.product
                 prod.is_featured = True
                 prod.save()
             except PaymentTransaction.DoesNotExist:
+                # Log or ignore – the transaction may have been deleted
                 pass
 
     return Response({"status": "acknowledged"}, status=200)
