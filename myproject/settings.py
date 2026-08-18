@@ -145,36 +145,35 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# ─── Static & Media ────────────────────────────────────────────────
+# =====================================================================
+# STATIC & MEDIA FILES – THE FIXED PART
+# =====================================================================
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ─── CRITICAL FIX: Set STATICFILES_STORAGE to avoid Cloudinary override error
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# ─── CRITICAL FIX: Define STATICFILES_STORAGE ──────────────────────
+# This prevents Cloudinary's custom collectstatic from raising an
+# AttributeError because it looks for this setting.
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 
-# ─── Whitelist for collectstatic (prevent missing file errors) ────
-WHITENOISE_MANIFEST_STRICT = False
-WHITENOISE_USE_FINDERS = True
-WHITENOISE_AUTOREFRESH = DEBUG
-
-# ─── STORAGES ──────────────────────────────────────────────────────
+# ─── STORAGES (Django 4.2+) ─────────────────────────────────────────
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
 
-# ─── FORCE COLLECTSTATIC TO USE A SIMPLE STORAGE (avoids Cloudinary) ──
-if 'collectstatic' in sys.argv:
-    # Override to avoid Cloudinary's custom collectstatic code
-    # (This is executed only during the build)
-    STORAGES['staticfiles']['BACKEND'] = 'django.contrib.staticfiles.storage.StaticFilesStorage'
-    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+# ─── WhiteNoise (serves static files in production) ──────────────────
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = DEBUG
+# Optional: enable compression in production (but not required for build)
+# WHITENOISE_COMPRESS = True
 
 # ─── Cloudinary ────────────────────────────────────────────────────
 cloudinary.config(
