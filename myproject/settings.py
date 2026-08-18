@@ -29,7 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ✅ Fallback for local development – but set a real SECRET_KEY in production!
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
 DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,django-ecommerce-backend-4u8q.onrender.com").split(",")
 
 # ─── CORS ──────────────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = [
