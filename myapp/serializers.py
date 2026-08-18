@@ -3,7 +3,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from .models import (
     Note, SensorReading, Photo, Product, PaymentTransaction,
-    Category, Location  # ✅ Import new models
+    Category, Location
 )
 
 # =====================================================================
@@ -35,10 +35,11 @@ class LocationSerializer(serializers.ModelSerializer):
 
 
 # =====================================================================
-# 💳 3. PAYMENT TRANSACTION SERIALIZER
+# 💳 3. PAYMENT TRANSACTION SERIALIZER (OPTIMIZED)
 # =====================================================================
 class PaymentTransactionSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    # ✅ This uses source='product.title'. It relies on the view to prefetch 'product'.
     product_title = serializers.CharField(source='product.title', read_only=True)
 
     class Meta:
@@ -48,6 +49,16 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
             'tx_ref', 'transaction_id', 'status', 'status_display', 'created_at'
         ]
         read_only_fields = ['id', 'status', 'transaction_id', 'tx_ref', 'created_at']
+
+    # 🚀 OPTIMIZATION METHOD: Call this in your views to prevent N+1 queries.
+    @staticmethod
+    def optimize_queryset(queryset):
+        """
+        Prefetches the related Product in a single SQL query.
+        Use this in your list/retrieve views:
+            qs = PaymentTransactionSerializer.optimize_queryset(PaymentTransaction.objects.all())
+        """
+        return queryset.select_related('product')
 
 
 # =====================================================================
@@ -70,7 +81,7 @@ class PhotoSerializer(serializers.ModelSerializer):
 
 
 # =====================================================================
-# 🌾 5. PRODUCT SERIALIZER (with dynamic category & location)
+# 🌾 5. PRODUCT SERIALIZER (FULLY OPTIMIZED)
 # =====================================================================
 class ProductSerializer(serializers.ModelSerializer):
     # ─── Seller fields ──────────────────────────────────────────────
@@ -127,6 +138,31 @@ class ProductSerializer(serializers.ModelSerializer):
         if not obj.weight:
             return 7000
         return int(5000 + (float(obj.weight) * 2500))
+
+    # 🚀 OPTIMIZATION METHODS: Call these in your views to prevent N+1 queries.
+    @staticmethod
+    def optimize_for_list(queryset):
+        """
+        Optimizes queryset for LIST views (e.g., /api/products/).
+        Fetches sellers, categories, locations (join) + all photos (1 extra query).
+        """
+        return queryset.select_related(
+            'seller', 'category', 'location'
+        ).prefetch_related(
+            'photos'
+        )
+
+    @staticmethod
+    def optimize_for_detail(queryset):
+        """
+        Optimizes queryset for DETAIL views (e.g., /api/products/1/).
+        Same as list, but you might add more prefetches later (e.g., related payments).
+        """
+        return queryset.select_related(
+            'seller', 'category', 'location'
+        ).prefetch_related(
+            'photos'
+        )
 
 
 # =====================================================================
