@@ -16,7 +16,7 @@ import django_filters
 from .models import (
     Note, SensorReading, Photo, StockMarketReading,
     Product, PaymentTransaction, SiteConfiguration,
-    Category, Location  # ✅ Import new models
+    Category, Location
 )
 from .serializers import (
     SensorReadingSerializer,
@@ -25,8 +25,8 @@ from .serializers import (
     PhotoSerializer,
     ProductSerializer,
     PaymentTransactionSerializer,
-    CategorySerializer,  # ✅ New
-    LocationSerializer   # ✅ New
+    CategorySerializer,
+    LocationSerializer
 )
 
 # =====================================================================
@@ -37,7 +37,7 @@ class ProductFilter(django_filters.FilterSet):
     max_price = django_filters.NumberFilter(field_name="price", lookup_expr='lte')
     condition = django_filters.CharFilter(field_name="condition", lookup_expr='exact')
 
-    # ✅ NEW: Dynamic category & location filters
+    # Dynamic category & location filters
     category = django_filters.ModelChoiceFilter(
         field_name='category',
         queryset=Category.objects.filter(is_active=True),
@@ -66,7 +66,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        # ✅ Updated to include category and location in select_related
         return Product.objects.select_related('seller', 'category', 'location') \
                               .prefetch_related('photos') \
                               .order_by('-is_featured', '-created_at')
@@ -84,7 +83,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Returns a list of active categories for the frontend.
-    Used to populate the category filter dropdown.
+    Used to populate the category filter dropdown and sidebar.
     """
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategorySerializer
@@ -148,7 +147,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Check for API key
         flw_secret = getattr(settings, 'FLW_SECRET_KEY', None)
         if not flw_secret and not settings.DEBUG:
             return Response(
@@ -156,7 +154,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # --- FEE FROM SITE CONFIGURATION (with fallback) ---
+        # --- FEE FROM SITE CONFIGURATION ---
         try:
             config = SiteConfiguration.objects.first()
             fee = config.promotion_fee if config else 20000.00
@@ -177,9 +175,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             status='PENDING'
         )
 
-        # ----------------------------------------------------------------
-        # 🔧 SANDBOX MODE: Use mock when DEBUG=True
-        # ----------------------------------------------------------------
         if settings.DEBUG:
             flw_url = f"{settings.BASE_URL}/mock-flutterwave/"
             flw_payload = {
@@ -253,10 +248,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def flutterwave_webhook(request):
-    """
-    Flutterwave webhook for charge.completed events.
-    Verifies signature using Verif-Hash header.
-    """
     signature = request.headers.get('Verif-Hash')
     expected = getattr(settings, 'FLW_SECRET_HASH', None)
     if not signature or signature != expected:
@@ -288,15 +279,11 @@ def flutterwave_webhook(request):
 
 
 # =====================================================================
-# 🧪 MOCK FLUTTERWAVE SANDBOX (for testing without real key)
+# 🧪 MOCK FLUTTERWAVE SANDBOX
 # =====================================================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def mock_flutterwave(request):
-    """
-    Mock Flutterwave charge endpoint – always returns success.
-    Only available when DEBUG=True.
-    """
     if not settings.DEBUG:
         return Response({"error": "Mock only in DEBUG"}, status=404)
 
@@ -319,12 +306,9 @@ def mock_flutterwave(request):
 
 
 # =====================================================================
-# 🔧 TEST PAYMENT CONFIRMATION (Manual webhook simulation)
+# 🔧 TEST PAYMENT CONFIRMATION
 # =====================================================================
 class TestPaymentView(APIView):
-    """
-    Manually mark a transaction as successful (for testing).
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -353,10 +337,6 @@ class TestPaymentView(APIView):
 # ⚙️ SITE CONFIGURATION (Promotion Fee)
 # =====================================================================
 class SiteConfigView(APIView):
-    """
-    Returns the current promotion fee from the site configuration.
-    This endpoint is used by the frontend to display the correct fee.
-    """
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -407,11 +387,7 @@ class ChartDataView2(APIView):
                 {"x": x, "y": y1, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 1"},
                 {"x": x, "y": y2, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 2"}
             ],
-            "layout": {
-                "title": "Stock Market Reading",
-                "xaxis": {"title": "Time"},
-                "yaxis": {"title": "Value"}
-            }
+            "layout": {"title": "Stock Market Reading", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
         }
         return Response(chart_data)
 
@@ -422,14 +398,8 @@ class ChartDataView(APIView):
         x = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
         y = [r.value for r in readings]
         chart_data = {
-            "data": [
-                {"x": x, "y": y, "type": "scatter", "mode": "lines+markers", "name": "Sensor"}
-            ],
-            "layout": {
-                "title": "Sensor Data",
-                "xaxis": {"title": "Time"},
-                "yaxis": {"title": "Value"}
-            }
+            "data": [{"x": x, "y": y, "type": "scatter", "mode": "lines+markers", "name": "Sensor"}],
+            "layout": {"title": "Sensor Data", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
         }
         return Response(chart_data)
 
