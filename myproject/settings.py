@@ -88,10 +88,13 @@ INSTALLED_APPS = [
     "myapp.apps.MyappConfig",
 ]
 
-# ─── Middleware ──────────────────────────────────────────────────────
+# ─── Middleware (OPTIMIZED ORDER) ────────────────────────────────────
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # 🚀 OPTIMIZATION: GZip compresses responses (API JSON, HTML, CSS).
+    # This reduces bandwidth and speeds up page loads significantly.
+    "django.middleware.gzip.GZipMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -121,13 +124,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "myproject.wsgi.application"
 
-# ─── Database ──────────────────────────────────────────────────────
+# ─── Database (OPTIMIZED) ────────────────────────────────────────────
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}",
         conn_max_age=600
     )
 }
+
+# 🚀 OPTIMIZATION: If using PostgreSQL, add a connect_timeout to fail fast
+# instead of hanging for minutes if the database is unreachable.
+if DATABASES['default']['ENGINE'] == 'django.db.backends.postgresql':
+    DATABASES['default'].setdefault('OPTIONS', {})['connect_timeout'] = 10
 
 # ─── Password Validation ──────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
@@ -167,6 +175,9 @@ STORAGES = {
 # ─── WhiteNoise (serves static files in production) ──────────────────
 WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = DEBUG
+# 🚀 OPTIMIZATION: Cache static files for 1 year in production.
+# This drastically reduces bandwidth and speeds up repeat page loads.
+WHITENOISE_MAX_AGE = 31536000 if not DEBUG else 0
 
 # ─── Cloudinary ────────────────────────────────────────────────────
 cloudinary.config(
@@ -190,6 +201,16 @@ BASE_URL = os.getenv("BASE_URL", "https://django-ecommerce-backend-4u8q.onrender
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# 🚀 OPTIMIZATION: In-memory caching reduces database hits for repeated queries
+# (e.g., SiteConfiguration, Categories, Locations).
+# In production, consider replacing with Redis for distributed caching.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
 # ─── Logging ──────────────────────────────────────────────────────
 LOGGING = {
     'version': 1,
@@ -207,6 +228,13 @@ LOGGING = {
         'django': {
             'handlers': ['console'],
             'level': 'INFO' if not DEBUG else 'DEBUG',
+            'propagate': False,
+        },
+        # 🚀 OPTIMIZATION: Suppress noisy database query logs in production.
+        # Set to 'DEBUG' during development if you need to inspect SQL.
+        'django.db.backends': {
+            'handlers': ['console'],
+            'level': 'WARNING' if not DEBUG else 'INFO',
             'propagate': False,
         },
     },
