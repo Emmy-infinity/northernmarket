@@ -19,14 +19,18 @@ class PhotoInline(TabularInline):
     extra = 3
 
 
-# ─── PRODUCT ADMIN ──────────────────────────────────────────────────
+# ─── PRODUCT ADMIN (OPTIMIZED) ──────────────────────────────────────
 @admin.register(Product)
 class ProductAdmin(ModelAdmin):
     list_display = ['title', 'price', 'condition', 'category', 'location', 'stock_count', 'is_featured']
     list_filter = ['condition', 'category', 'location', 'is_featured']
     search_fields = ['title', 'description', 'seller__username']
     inlines = [PhotoInline]
-    # Optional: add fieldsets if you want a custom layout
+    
+    # 🚀 OPTIMIZATION: Fetches seller, category, and location in a single SQL query.
+    # Without this, the admin list page runs 1 query per row for each foreign key.
+    list_select_related = ('seller', 'category', 'location')
+    
     fieldsets = (
         (None, {
             'fields': ('seller', 'title', 'description', 'price', 'condition', 'stock_count')
@@ -79,14 +83,48 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
     form = UserChangeForm
     add_form = UserCreationForm
     change_password_form = UserChangeForm
-    # You can add custom list_display if needed
     list_display = ('username', 'email', 'first_name', 'last_name', 'is_staff')
 
 
-# ─── OTHER MODELS (simple registrations) ──────────────────────────
-# If you want these to be managed in the admin, uncomment:
-# admin.site.register(PaymentTransaction, ModelAdmin)
-# admin.site.register(Note, ModelAdmin)
-# admin.site.register(SensorReading, ModelAdmin)
-# admin.site.register(StockMarketReading, ModelAdmin)
-# admin.site.register(UserProfile, ModelAdmin)
+# ─── PAYMENT TRANSACTION ADMIN (OPTIMIZED) ──────────────────────────
+@admin.register(PaymentTransaction)
+class PaymentTransactionAdmin(ModelAdmin):
+    list_display = ('tx_ref', 'product', 'amount', 'phone_number', 'status', 'created_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('tx_ref', 'transaction_id', 'phone_number', 'product__title')
+    
+    # 🚀 OPTIMIZATION: Fetches the related Product in a single SQL query.
+    list_select_related = ('product',)
+    
+    readonly_fields = ('tx_ref', 'transaction_id', 'created_at')
+
+
+# ─── USER PROFILE ADMIN ──────────────────────────────────────────────
+@admin.register(UserProfile)
+class UserProfileAdmin(ModelAdmin):
+    list_display = ('user', 'phone_number', 'whatsapp_number')
+    search_fields = ('user__username', 'phone_number', 'whatsapp_number')
+    list_select_related = ('user',)
+
+
+# ─── NOTE ADMIN ──────────────────────────────────────────────────────
+@admin.register(Note)
+class NoteAdmin(ModelAdmin):
+    list_display = ('title', 'author', 'created_at')
+    search_fields = ('title', 'content', 'author__username')
+    list_filter = ('created_at',)
+    list_select_related = ('author',)
+
+
+# ─── SENSOR READING ADMIN ────────────────────────────────────────────
+@admin.register(SensorReading)
+class SensorReadingAdmin(ModelAdmin):
+    list_display = ('timestamp', 'value')
+    list_filter = ('timestamp',)
+
+
+# ─── STOCK MARKET READING ADMIN ──────────────────────────────────────
+@admin.register(StockMarketReading)
+class StockMarketReadingAdmin(ModelAdmin):
+    list_display = ('timestamp', 'value1', 'value2')
+    list_filter = ('timestamp',)
