@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 import dj_database_url
@@ -8,8 +9,6 @@ import cloudinary.uploader
 import cloudinary.api
 
 # ─── Unfold Admin Compatibility Patch ─────────────────────────────────
-import sys
-import types
 from django.contrib.admin.templatetags import admin_list
 
 original_node_init = admin_list.InclusionAdminNode.__init__
@@ -27,8 +26,11 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─── Security ────────────────────────────────────────────────────────
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
-DEBUG = os.getenv("DEBUG", "False") == "True"   # Set to False in production
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable is not set.")
+
+DEBUG = os.getenv("DEBUG", "False") == "True"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 # ─── CORS ──────────────────────────────────────────────────────────────
@@ -37,14 +39,23 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
-    "https://northernmarket-pwa.onrender.com",
+    os.getenv("FRONTEND_URL", "https://northernmarket-pwa.onrender.com"),
 ]
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_HEADERS = [
-    "accept", "accept-encoding", "authorization",
-    "content-type", "dnt", "origin", "user-agent",
-    "x-csrftoken", "x-requested-with",
+
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS + [
+    "https://django-ecommerce-backend-4u8q.onrender.com",
 ]
+
+# ─── Security Settings for Production ──────────────────────────────
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 # ─── REST Framework ──────────────────────────────────────────────────
 REST_FRAMEWORK = {
@@ -81,7 +92,7 @@ INSTALLED_APPS = [
 
 # ─── Middleware ──────────────────────────────────────────────────────
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",   # Must be first
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -140,16 +151,30 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ─── Storages ──────────────────────────────────────────────────────
-# ⚠️ Using StaticFilesStorage to avoid collectstatic errors.
+# ─── CRITICAL FIX: Set STATICFILES_STORAGE to avoid Cloudinary override error
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# ─── Whitelist for collectstatic (prevent missing file errors) ────
+WHITENOISE_MANIFEST_STRICT = False
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = DEBUG
+
+# ─── STORAGES ──────────────────────────────────────────────────────
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
     },
     "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+# ─── FORCE COLLECTSTATIC TO USE A SIMPLE STORAGE (avoids Cloudinary) ──
+if 'collectstatic' in sys.argv:
+    # Override to avoid Cloudinary's custom collectstatic code
+    # (This is executed only during the build)
+    STORAGES['staticfiles']['BACKEND'] = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 
 # ─── Cloudinary ────────────────────────────────────────────────────
 cloudinary.config(
@@ -169,7 +194,28 @@ CLOUDINARY_STORAGE = {
 FLW_SECRET_KEY = os.getenv("FLUTTERWAVE_SECRET_KEY")
 FLW_SECRET_HASH = os.getenv("FLUTTERWAVE_WEBHOOK_SECRET_HASH")
 
-# ─── Base URL (for mock endpoints) ──────────────────────────────
 BASE_URL = os.getenv("BASE_URL", "https://django-ecommerce-backend-4u8q.onrender.com")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ─── Logging ──────────────────────────────────────────────────────
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO' if not DEBUG else 'DEBUG',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO' if not DEBUG else 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
