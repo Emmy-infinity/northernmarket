@@ -15,7 +15,8 @@ import django_filters
 
 from .models import (
     Note, SensorReading, Photo, StockMarketReading,
-    Product, PaymentTransaction, SiteConfiguration
+    Product, PaymentTransaction, SiteConfiguration,
+    Category, Location  # ✅ Import new models
 )
 from .serializers import (
     SensorReadingSerializer,
@@ -23,7 +24,9 @@ from .serializers import (
     NoteSerializer,
     PhotoSerializer,
     ProductSerializer,
-    PaymentTransactionSerializer
+    PaymentTransactionSerializer,
+    CategorySerializer,  # ✅ New
+    LocationSerializer   # ✅ New
 )
 
 # =====================================================================
@@ -33,11 +36,22 @@ class ProductFilter(django_filters.FilterSet):
     min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
     max_price = django_filters.NumberFilter(field_name="price", lookup_expr='lte')
     condition = django_filters.CharFilter(field_name="condition", lookup_expr='exact')
-    item_location = django_filters.CharFilter(field_name="item_location", lookup_expr='exact')
+
+    # ✅ NEW: Dynamic category & location filters
+    category = django_filters.ModelChoiceFilter(
+        field_name='category',
+        queryset=Category.objects.filter(is_active=True),
+        to_field_name='slug'
+    )
+    location = django_filters.ModelChoiceFilter(
+        field_name='location',
+        queryset=Location.objects.filter(is_active=True),
+        to_field_name='code'
+    )
 
     class Meta:
         model = Product
-        fields = ['min_price', 'max_price', 'condition', 'item_location']
+        fields = ['min_price', 'max_price', 'condition', 'category', 'location']
 
 
 # =====================================================================
@@ -52,7 +66,8 @@ class ProductViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        return Product.objects.select_related('seller') \
+        # ✅ Updated to include category and location in select_related
+        return Product.objects.select_related('seller', 'category', 'location') \
                               .prefetch_related('photos') \
                               .order_by('-is_featured', '-created_at')
 
@@ -61,6 +76,29 @@ class ProductViewSet(viewsets.ModelViewSet):
         uploaded_images = self.request.FILES.getlist('image')
         for image_file in uploaded_images:
             Photo.objects.create(product=product_instance, image=image_file)
+
+
+# =====================================================================
+# 🏷️ CATEGORY & LOCATION VIEWSETS (READ-ONLY)
+# =====================================================================
+class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Returns a list of active categories for the frontend.
+    Used to populate the category filter dropdown.
+    """
+    queryset = Category.objects.filter(is_active=True)
+    serializer_class = CategorySerializer
+    permission_classes = [AllowAny]
+
+
+class LocationViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Returns a list of active locations for the frontend.
+    Used to populate the location filter dropdown.
+    """
+    queryset = Location.objects.filter(is_active=True)
+    serializer_class = LocationSerializer
+    permission_classes = [AllowAny]
 
 
 # =====================================================================
