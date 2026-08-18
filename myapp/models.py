@@ -1,5 +1,3 @@
-# import sys  <-- ❌ REMOVED (unused)
-
 from django.db import models
 from django.contrib.auth import get_user_model
 from cloudinary.models import CloudinaryField
@@ -50,8 +48,8 @@ class Category(models.Model):
 
 
 class Location(models.Model):
-    name = models.CharField(max_length=100, unique=True)   # e.g., "Gulu City"
-    code = models.CharField(max_length=10, unique=True)    # e.g., "GULU"
+    name = models.CharField(max_length=100, unique=True)
+    code = models.CharField(max_length=10, unique=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -63,7 +61,7 @@ class Location(models.Model):
 
 
 # =====================================================================
-# CORE MARKETPLACE LISTINGS BLUEPRINT
+# CORE MARKETPLACE LISTINGS BLUEPRINT (FULLY OPTIMIZED)
 # =====================================================================
 class Product(models.Model):
     CONDITION_CHOICES = [
@@ -74,7 +72,9 @@ class Product(models.Model):
     ]
 
     seller = models.ForeignKey(User, on_delete=models.CASCADE, related_name='products')
-    title = models.CharField(max_length=255)
+    
+    # ✅ FIXED: Added db_index=True for lightning-fast search
+    title = models.CharField(max_length=255, db_index=True)
     description = models.TextField()
 
     # Financials & Inventory
@@ -82,7 +82,7 @@ class Product(models.Model):
     condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED', db_index=True)
     stock_count = models.PositiveIntegerField(default=1)
 
-    # 🔥 NEW: Dynamic Category & Location (admin-manageable)
+    # Dynamic Category & Location
     category = models.ForeignKey(
         Category,
         on_delete=models.SET_NULL,
@@ -100,7 +100,7 @@ class Product(models.Model):
         help_text="Where the item is located"
     )
 
-    # Legacy logistics fields (still used)
+    # Legacy fields
     seller_location_details = models.CharField(max_length=255, blank=True, help_text="e.g., Near Gulu University Main Gate")
     weight = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, help_text="Weight in KG")
     contact_phone = models.CharField(max_length=15, blank=True, help_text="Direct phone number for item inquiries")
@@ -115,9 +115,11 @@ class Product(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['price']),
-            models.Index(fields=['condition']),
-            models.Index(fields=['created_at']),
+            # 🚀 OPTIMIZATION: Composite indexes for the most common e-commerce queries.
+            # This replaces the duplicate single-field indexes you had earlier.
+            models.Index(fields=['is_featured', 'featured_until'], name='prod_feat_until_idx'),
+            models.Index(fields=['category', 'price'], name='prod_cat_price_idx'),
+            models.Index(fields=['location', '-created_at'], name='prod_loc_created_idx'),
         ]
 
     def save(self, *args, **kwargs):
@@ -137,7 +139,7 @@ class Photo(models.Model):
 
 
 # =====================================================================
-# PAYMENT LEDGERS & HISTORICAL MODELS
+# PAYMENT LEDGERS & HISTORICAL MODELS (FULLY OPTIMIZED)
 # =====================================================================
 class PaymentTransaction(models.Model):
     STATUS_CHOICES = [
@@ -149,13 +151,20 @@ class PaymentTransaction(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     phone_number = models.CharField(max_length=15)
-    tx_ref = models.CharField(max_length=100, unique=True)
+    tx_ref = models.CharField(max_length=100, unique=True)  # Unique automatically creates an index
     transaction_id = models.CharField(max_length=100, blank=True, null=True)
-    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING')
+    
+    # ✅ FIXED: Added db_index=True to status (you query this constantly)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING', db_index=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # 🚀 OPTIMIZATION: Fetch pending transactions quickly (e.g., for retry logic)
+            models.Index(fields=['status', 'created_at'], name='pay_stat_created_idx'),
+        ]
 
     def __str__(self):
         return f"TX: {self.tx_ref} - {self.status}"
@@ -189,7 +198,7 @@ class StockMarketReading(models.Model):
 
 
 # =====================================================================
-# ⚙️ SITE CONFIGURATION (Promotion Fee)
+# ⚙️ SITE CONFIGURATION
 # =====================================================================
 class SiteConfiguration(models.Model):
     promotion_fee = models.DecimalField(
