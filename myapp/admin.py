@@ -38,6 +38,7 @@ from .models import SiteConfiguration
 
 @admin.register(SiteConfiguration)
 class SiteConfigurationAdmin(admin.ModelAdmin):
+    compressed_fields = []   # ✅ Fix for Unfold theme
     fields = ('promotion_fee',)
     readonly_fields = ('updated_at',)
     list_display = ('id', 'promotion_fee', 'updated_at')
