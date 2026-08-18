@@ -26,10 +26,8 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─── Security ────────────────────────────────────────────────────────
-SECRET_KEY = os.getenv("SECRET_KEY")
-if not SECRET_KEY:
-    raise ValueError("SECRET_KEY environment variable is not set.")
-
+# ✅ Fallback for local development – but set a real SECRET_KEY in production!
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
@@ -145,10 +143,7 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# =====================================================================
-# STATIC & MEDIA FILES – THE FIXED PART
-# =====================================================================
-
+# ─── Static & Media ────────────────────────────────────────────────
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
@@ -172,8 +167,6 @@ STORAGES = {
 # ─── WhiteNoise (serves static files in production) ──────────────────
 WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = DEBUG
-# Optional: enable compression in production (but not required for build)
-# WHITENOISE_COMPRESS = True
 
 # ─── Cloudinary ────────────────────────────────────────────────────
 cloudinary.config(
