@@ -10,6 +10,7 @@ router.register(r'payments', views.PaymentTransactionViewSet, basename='payment'
 urlpatterns = [
     # ─── FLUTTERWAVE WEBHOOK ──────────────────────────────────────────
     path('payments/webhook/', views.flutterwave_webhook, name='flw_webhook'),
+    path('site-config/', views.SiteConfigView.as_view(), name='site-config'),
 
     # ─── MOCK FLUTTERWAVE (DEBUG only) ────────────────────────────────
     path('mock-flutterwave/', views.mock_flutterwave, name='mock_flutterwave'),
