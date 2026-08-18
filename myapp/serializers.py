@@ -1,7 +1,10 @@
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Note, SensorReading, Photo, Product, PaymentTransaction
+from .models import (
+    Note, SensorReading, Photo, Product, PaymentTransaction,
+    Category, Location  # ✅ Import new models
+)
 
 # =====================================================================
 # 🔐 1. USER & AUTHENTICATION SERIALIZERS
@@ -13,12 +16,26 @@ class UserSerializer(serializers.ModelSerializer):
         extra_kwargs = {"password": {"write_only": True}}
 
     def create(self, validated_data):
-        # ✅ Uses create_user to hash password – unchanged and safe.
         return User.objects.create_user(**validated_data)
 
 
 # =====================================================================
-# 💳 2. MOBILE MONEY BILLING TRANSACTION ENGINE
+# 🏷️ 2. CATEGORY & LOCATION SERIALIZERS (READ-ONLY)
+# =====================================================================
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ['id', 'name', 'slug', 'description', 'is_active']
+
+
+class LocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Location
+        fields = ['id', 'name', 'code', 'is_active']
+
+
+# =====================================================================
+# 💳 3. PAYMENT TRANSACTION SERIALIZER
 # =====================================================================
 class PaymentTransactionSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -31,11 +48,10 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
             'tx_ref', 'transaction_id', 'status', 'status_display', 'created_at'
         ]
         read_only_fields = ['id', 'status', 'transaction_id', 'tx_ref', 'created_at']
-        # ✅ No changes – already clean.
 
 
 # =====================================================================
-# 📸 3. MULTI-IMAGE ASSETS COMPRESSION PIPELINE
+# 📸 4. PHOTO SERIALIZER
 # =====================================================================
 class PhotoSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
@@ -54,34 +70,53 @@ class PhotoSerializer(serializers.ModelSerializer):
 
 
 # =====================================================================
-# 🌾 4. B2B MARKETPLACE PRODUCT LISTING GRID ENGINE
+# 🌾 5. PRODUCT SERIALIZER (with dynamic category & location)
 # =====================================================================
 class ProductSerializer(serializers.ModelSerializer):
-    # Seller fields are read‑only by using ReadOnlyField – explicit and safe.
+    # ─── Seller fields ──────────────────────────────────────────────
     seller = serializers.ReadOnlyField(source='seller.id')
     seller_username = serializers.ReadOnlyField(source='seller.username')
     seller_email = serializers.ReadOnlyField(source='seller.email')
-    
+
+    # ─── Photos ─────────────────────────────────────────────────────
     photos = PhotoSerializer(many=True, read_only=True)
-    
+
+    # ─── Condition display ──────────────────────────────────────────
     condition_display = serializers.ReadOnlyField(source='get_condition_display')
-    item_location_display = serializers.ReadOnlyField(source='get_item_location_display')
-    
+
+    # ─── DYNAMIC CATEGORY & LOCATION FIELDS ──────────────────────
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_slug = serializers.CharField(source='category.slug', read_only=True)
+    location_name = serializers.CharField(source='location.name', read_only=True)
+    location_code = serializers.CharField(source='location.code', read_only=True)
+
+    # ─── Custom fields ─────────────────────────────────────────────
     days_since_listing = serializers.SerializerMethodField()
     bulk_delivery_estimate_ugx = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
-            'id', 'seller', 'seller_username', 'seller_email', 'title', 
-            'description', 'price', 'condition', 'condition_display', 
-            'stock_count', 'item_location', 'item_location_display', 
-            'seller_location_details', 'weight', 'contact_phone', 
-            'photos', 'is_featured', 'created_at', 'days_since_listing',
+            'id',
+            'seller', 'seller_username', 'seller_email',
+            'title', 'description',
+            'price',
+            'condition', 'condition_display',
+            'stock_count',
+            # ─── Dynamic fields ──────────────────────────────────
+            'category', 'category_name', 'category_slug',
+            'location', 'location_name', 'location_code',
+            # ─── Legacy fields ──────────────────────────────────
+            'seller_location_details',
+            'weight',
+            'contact_phone',
+            # ─── Media & rankings ────────────────────────────────
+            'photos',
+            'is_featured',
+            'created_at',
+            'days_since_listing',
             'bulk_delivery_estimate_ugx'
         ]
-        # ✅ Removed redundant 'seller' from read_only_fields because it's already a ReadOnlyField.
-        #    'is_featured' and 'created_at' are kept read‑only to prevent mass‑assignment issues.
         read_only_fields = ['id', 'is_featured', 'created_at']
 
     def get_days_since_listing(self, obj):
@@ -89,14 +124,13 @@ class ProductSerializer(serializers.ModelSerializer):
         return max(0, delta.days)
 
     def get_bulk_delivery_estimate_ugx(self, obj):
-        # Safe fallback: if no weight, return a base estimate.
         if not obj.weight:
             return 7000
         return int(5000 + (float(obj.weight) * 2500))
 
 
 # =====================================================================
-# 📝 5. SENSOR READINGS & LEGACY NOTE MANAGEMENT TRACKS
+# 📝 6. NOTE SERIALIZER
 # =====================================================================
 class NoteSerializer(serializers.ModelSerializer):
     class Meta:
@@ -105,8 +139,10 @@ class NoteSerializer(serializers.ModelSerializer):
         extra_kwargs = {"author": {"read_only": True}}
 
 
+# =====================================================================
+# 📊 7. SENSOR READING SERIALIZER
+# =====================================================================
 class SensorReadingSerializer(serializers.ModelSerializer):
-    # Mapping to 'x' and 'y' for charting – unchanged.
     x = serializers.DateTimeField(source='timestamp', format='%Y-%m-%d %H:%M:%S')
     y = serializers.FloatField(source='value')
 
