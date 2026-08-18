@@ -6,11 +6,12 @@ from cloudinary.models import CloudinaryField
 from django.utils import timezone
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils.text import slugify
 
 User = get_user_model()
 
 # =====================================================================
-# 🌟 USER PROFILE INFRASTRUCTURE (TRACKS THE PERSON'S CONTACTS)
+# 🌟 USER PROFILE INFRASTRUCTURE
 # =====================================================================
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
@@ -20,10 +21,45 @@ class UserProfile(models.Model):
     def __str__(self):
         return f"Profile for {self.user.username}"
 
-# ✅ OPTIMIZED: Simplified signal using get_or_create (removes redundant try/except)
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
     UserProfile.objects.get_or_create(user=instance)
+
+
+# =====================================================================
+# 🏷️ DYNAMIC CATEGORIES & LOCATIONS
+# =====================================================================
+class Category(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=100, unique=True, blank=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name_plural = "Categories"
+        ordering = ['name']
+
+
+class Location(models.Model):
+    name = models.CharField(max_length=100, unique=True)   # e.g., "Gulu City"
+    code = models.CharField(max_length=10, unique=True)    # e.g., "GULU"
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['name']
 
 
 # =====================================================================
@@ -36,60 +72,55 @@ class Product(models.Model):
         ('USED', 'Used / Working'),
         ('SCRAP', 'Scrap / For Spare Parts'),
     ]
-    
-    LOCATION_CHOICES = [
-        ('GULU', 'Gulu City'),
-        ('LIRA', 'Lira City'),
-        ('KLA', 'Kampala Road / Hub'),
-        ('ARUA', 'Arua City'),
-    ]
 
     seller = models.ForeignKey(User, on_delete=models.CASCADE, related_name='products')
     title = models.CharField(max_length=255)
     description = models.TextField()
-    
+
     # Financials & Inventory
-    price = models.DecimalField(max_digits=12, decimal_places=2, db_index=True)  # ✅ Added index
-    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED', db_index=True)  # ✅ Added index
+    price = models.DecimalField(max_digits=12, decimal_places=2, db_index=True)
+    condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED', db_index=True)
     stock_count = models.PositiveIntegerField(default=1)
-    
-    # Logistics
-    item_location = models.CharField(max_length=10, choices=LOCATION_CHOICES, default='GULU', db_index=True)  # ✅ Added index
-    seller_location_details = models.CharField(max_length=255, help_text="e.g., Near Gulu University Main Gate")
-    
-    # Infrastructure fields
-    weight = models.DecimalField(
-        max_digits=6, 
-        decimal_places=2, 
-        null=True, 
-        blank=True, 
-        help_text="Weight in Kilograms (KG), e.g., 2.50"
+
+    # 🔥 NEW: Dynamic Category & Location (admin-manageable)
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='products',
+        help_text="Select a product category"
     )
-    contact_phone = models.CharField(
-        max_length=15, 
-        blank=True, 
-        help_text="Direct phone number for item inquiries (e.g., 256770000000)"
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='products',
+        help_text="Where the item is located"
     )
-    
+
+    # Legacy logistics fields (still used)
+    seller_location_details = models.CharField(max_length=255, blank=True, help_text="e.g., Near Gulu University Main Gate")
+    weight = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, help_text="Weight in KG")
+    contact_phone = models.CharField(max_length=15, blank=True, help_text="Direct phone number for item inquiries")
+
     # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)  # ✅ Added index
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     # B2B Premium Ranking Fields
     is_featured = models.BooleanField(default=False, db_index=True)
     featured_until = models.DateTimeField(null=True, blank=True, db_index=True)
 
-    # ✅ OPTIMIZED: Added Meta for default ordering and explicit indexes
     class Meta:
-        ordering = ['-created_at']  # Newest products first by default
+        ordering = ['-created_at']
         indexes = [
             models.Index(fields=['price']),
             models.Index(fields=['condition']),
-            models.Index(fields=['item_location']),
             models.Index(fields=['created_at']),
         ]
 
     def save(self, *args, **kwargs):
-        # Auto-expire featured status
         if self.featured_until and self.featured_until < timezone.now():
             self.is_featured = False
             self.featured_until = None
@@ -116,15 +147,13 @@ class PaymentTransaction(models.Model):
     ]
 
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='payments')
-    # ✅ OPTIMIZED: Increased max_digits from 10 → 12 to safely match Product.price
-    amount = models.DecimalField(max_digits=12, decimal_places=2)  
-    phone_number = models.CharField(max_length=15) 
-    tx_ref = models.CharField(max_length=100, unique=True) 
-    transaction_id = models.CharField(max_length=100, blank=True, null=True) 
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    phone_number = models.CharField(max_length=15)
+    tx_ref = models.CharField(max_length=100, unique=True)
+    transaction_id = models.CharField(max_length=100, blank=True, null=True)
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # ✅ OPTIMIZED: Added Meta for default ordering
     class Meta:
         ordering = ['-created_at']
 
@@ -159,9 +188,9 @@ class StockMarketReading(models.Model):
         return f"{self.timestamp}: {self.value1} / {self.value2}"
 
 
-
-# models.py – add at the bottom
-
+# =====================================================================
+# ⚙️ SITE CONFIGURATION (Promotion Fee)
+# =====================================================================
 class SiteConfiguration(models.Model):
     promotion_fee = models.DecimalField(
         max_digits=10,
@@ -180,6 +209,5 @@ class SiteConfiguration(models.Model):
 
     @classmethod
     def get_config(cls):
-        """Return the single config instance, creating a default one if it doesn't exist."""
         config, created = cls.objects.get_or_create(id=1)
         return config
