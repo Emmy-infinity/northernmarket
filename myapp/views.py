@@ -13,8 +13,10 @@ from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
-# Import SiteConfiguration as well
-from .models import Note, SensorReading, Photo, StockMarketReading, Product, PaymentTransaction, SiteConfiguration
+from .models import (
+    Note, SensorReading, Photo, StockMarketReading,
+    Product, PaymentTransaction, SiteConfiguration
+)
 from .serializers import (
     SensorReadingSerializer,
     UserSerializer,
@@ -121,7 +123,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             config = SiteConfiguration.objects.first()
             fee = config.promotion_fee if config else 20000.00
         except Exception:
-            fee = 20000.00  # fallback if table doesn't exist
+            fee = 20000.00
 
         try:
             product = Product.objects.get(id=product_id, seller=request.user)
@@ -131,7 +133,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         unique_ref = f"FLW-UG-{uuid.uuid4().hex[:8].upper()}"
         transaction = PaymentTransaction.objects.create(
             product=product,
-            amount=fee,                     # ← Use config fee
+            amount=fee,
             phone_number=phone,
             tx_ref=unique_ref,
             status='PENDING'
@@ -142,11 +144,10 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         # ----------------------------------------------------------------
         if settings.DEBUG:
             flw_url = f"{settings.BASE_URL}/mock-flutterwave/"
-            # We'll use a mock payload; the mock endpoint will ignore it.
             flw_payload = {
                 "phone_number": phone,
                 "network": network,
-                "amount": str(fee),          # ← Use config fee
+                "amount": str(fee),
                 "currency": "UGX",
                 "email": request.user.email,
                 "tx_ref": unique_ref,
@@ -156,7 +157,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             headers = {"Content-Type": "application/json"}
             print(f"🧪 SANDBOX: Using mock Flutterwave endpoint")
         else:
-            # Production: real Flutterwave
             flw_url = "https://api.flutterwave.com/v3/charges?type=mobile_money_uganda"
             headers = {
                 "Authorization": f"Bearer {flw_secret}",
@@ -165,7 +165,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             flw_payload = {
                 "phone_number": phone,
                 "network": network,
-                "amount": str(fee),          # ← Use config fee
+                "amount": str(fee),
                 "currency": "UGX",
                 "email": request.user.email,
                 "tx_ref": unique_ref,
@@ -219,7 +219,6 @@ def flutterwave_webhook(request):
     Flutterwave webhook for charge.completed events.
     Verifies signature using Verif-Hash header.
     """
-    # Verify signature
     signature = request.headers.get('Verif-Hash')
     expected = getattr(settings, 'FLW_SECRET_HASH', None)
     if not signature or signature != expected:
@@ -239,7 +238,6 @@ def flutterwave_webhook(request):
                 tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
                 tx.status = 'SUCCESSFUL'
                 tx.save()
-                # Mark product as featured
                 tx.product.is_featured = True
                 tx.product.save()
                 print(f"✅ Transaction {tx_ref} marked successful.")
@@ -314,6 +312,22 @@ class TestPaymentView(APIView):
 
 
 # =====================================================================
+# ⚙️ SITE CONFIGURATION (Promotion Fee)
+# =====================================================================
+class SiteConfigView(APIView):
+    """
+    Returns the current promotion fee from the site configuration.
+    This endpoint is used by the frontend to display the correct fee.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        config = SiteConfiguration.objects.first()
+        fee = config.promotion_fee if config else 20000.00
+        return Response({"promotion_fee": fee})
+
+
+# =====================================================================
 # 📝 NOTE, USER, CHART, IMAGE VIEWS
 # =====================================================================
 class NoteListCreate(generics.ListCreateAPIView):
@@ -355,7 +369,11 @@ class ChartDataView2(APIView):
                 {"x": x, "y": y1, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 1"},
                 {"x": x, "y": y2, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 2"}
             ],
-            "layout": {"title": "Stock Market Reading", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
+            "layout": {
+                "title": "Stock Market Reading",
+                "xaxis": {"title": "Time"},
+                "yaxis": {"title": "Value"}
+            }
         }
         return Response(chart_data)
 
@@ -366,8 +384,14 @@ class ChartDataView(APIView):
         x = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
         y = [r.value for r in readings]
         chart_data = {
-            "data": [{"x": x, "y": y, "type": "scatter", "mode": "lines+markers", "name": "Sensor"}],
-            "layout": {"title": "Sensor Data", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
+            "data": [
+                {"x": x, "y": y, "type": "scatter", "mode": "lines+markers", "name": "Sensor"}
+            ],
+            "layout": {
+                "title": "Sensor Data",
+                "xaxis": {"title": "Time"},
+                "yaxis": {"title": "Value"}
+            }
         }
         return Response(chart_data)
 
