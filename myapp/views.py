@@ -55,7 +55,7 @@ class ProductFilter(django_filters.FilterSet):
 
 
 # =====================================================================
-# 🏪 PRODUCT VIEWSET
+# 🏪 PRODUCT VIEWSET (OPTIMIZED)
 # =====================================================================
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
@@ -65,10 +65,12 @@ class ProductViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'description']
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    # 🚀 OPTIMIZED: Uses the centralized serializer optimization method.
+    # This guarantees select_related('seller','category','location') + prefetch_related('photos')
     def get_queryset(self):
-        return Product.objects.select_related('seller', 'category', 'location') \
-                              .prefetch_related('photos') \
-                              .order_by('-is_featured', '-created_at')
+        return ProductSerializer.optimize_for_list(
+            Product.objects.all()
+        ).order_by('-is_featured', '-created_at')
 
     def perform_create(self, serializer):
         product_instance = serializer.save(seller=self.request.user)
@@ -123,14 +125,16 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 💳 FLUTTERWAVE MOBILE MONEY PAYMENT (UGANDA)
+# 💳 FLUTTERWAVE MOBILE MONEY PAYMENT (UGANDA) - OPTIMIZED
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
 
+    # 🚀 OPTIMIZED: Uses the centralized serializer optimization method.
     def get_queryset(self):
-        return PaymentTransaction.objects.select_related('product') \
-                                         .order_by('-created_at')
+        return PaymentTransactionSerializer.optimize_queryset(
+            PaymentTransaction.objects.all()
+        ).order_by('-created_at')
 
     def create(self, request, *args, **kwargs):
         """
@@ -161,8 +165,9 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         except Exception:
             fee = 20000.00
 
+        # 🚀 OPTIMIZED: Added select_related to fetch seller in the same query.
         try:
-            product = Product.objects.get(id=product_id, seller=request.user)
+            product = Product.objects.select_related('seller').get(id=product_id, seller=request.user)
         except Product.DoesNotExist:
             return Response({"error": "Product not found or you don't own it."}, status=404)
 
@@ -207,7 +212,10 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             }
 
         try:
-            response = requests.post(flw_url, json=flw_payload, headers=headers, timeout=15)
+            # 🚀🚀🚀 CRITICAL FIX: Increased timeout from 15 to 60 seconds.
+            # This gives Render enough time to wake up (if free tier) AND allows
+            # Flutterwave to process the request without premature failure.
+            response = requests.post(flw_url, json=flw_payload, headers=headers, timeout=60)
             data = response.json()
 
             if response.status_code in [200, 201] and data.get("status") == "success":
