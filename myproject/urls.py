@@ -12,7 +12,6 @@ from rest_framework_simplejwt.views import (
 urlpatterns = [
     # Redirect root to /api/
     path('', RedirectView.as_view(url='/api/', permanent=False)),
-
     path("admin/", admin.site.urls),
     path("api/user/register/", CreateUserView.as_view(), name="register"),
     path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
