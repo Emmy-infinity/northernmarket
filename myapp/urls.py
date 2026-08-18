@@ -8,8 +8,8 @@ router = DefaultRouter()
 router.register(r'products', views.ProductViewSet, basename='product')
 router.register(r'photos', views.PhotoViewSet, basename='photo')
 router.register(r'payments', views.PaymentTransactionViewSet, basename='payment')
-router.register(r'categories', views.CategoryViewSet, basename='category')   # ✅ NEW
-router.register(r'locations', views.LocationViewSet, basename='location')     # ✅ NEW
+router.register(r'categories', views.CategoryViewSet, basename='category')   # ✅
+router.register(r'locations', views.LocationViewSet, basename='location')     # ✅
 
 urlpatterns = [
     path('payments/webhook/', views.flutterwave_webhook, name='flw_webhook'),
