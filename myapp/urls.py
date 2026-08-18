@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
 
-app_name = 'myapp'
+app_name = 'myapp'   # ✅ Must be present
 
 router = DefaultRouter()
 router.register(r'products', views.ProductViewSet, basename='product')
@@ -13,7 +13,7 @@ urlpatterns = [
     path('payments/webhook/', views.flutterwave_webhook, name='flw_webhook'),
     path('mock-flutterwave/', views.mock_flutterwave, name='mock_flutterwave'),
     path('test-payment/', views.TestPaymentView.as_view(), name='test-payment'),
-    path('site-config/', views.SiteConfigView.as_view(), name='site-config'),  # ✅ Promotion fee endpoint
+    path('site-config/', views.SiteConfigView.as_view(), name='site-config'),  # ✅ ADD THIS LINE
     path("notes/", views.NoteListCreate.as_view(), name="note-list"),
     path("notes/delete/<int:pk>/", views.NoteDelete.as_view(), name="note-delete"),
     path('sensor_reading/', views.ChartDataView.as_view(), name="sensor-reading"),
