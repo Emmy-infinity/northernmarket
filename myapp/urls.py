@@ -18,11 +18,12 @@ router.register(r'locations', views.LocationViewSet, basename='location')
 # 🔗 URL PATTERNS (Ordered by priority: Webhooks → Utilities → Router)
 # =====================================================================
 urlpatterns = [
-    # ─── 1. WEBHOOKS (Must be externally accessible & high-priority) ──
-    path('payments/webhook/', views.flutterwave_webhook, name='flw_webhook'),
+    # ─── 1. WEBHOOKS (🔄 CHANGED: Mapped to Pesapal IPN listener view) ──
+    path('payments/webhook/', views.pesapal_webhook, name='pesapal_webhook'),
 
     # ─── 2. MOCK & TEST ENDPOINTS (Development-only) ──────────────────
-    path('mock-flutterwave/', views.mock_flutterwave, name='mock_flutterwave'),
+    # Note: Pesapal uses sandbox URLs built-in (cybqa.pesapal.com), 
+    # so custom mock views are usually bypassed unless you want a local testing harness.
     path('test-payment/', views.TestPaymentView.as_view(), name='test-payment'),
 
     # ─── 3. CONFIGURATION & UTILITY ENDPOINTS ──────────────────────────
