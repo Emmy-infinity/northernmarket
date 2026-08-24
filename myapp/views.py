@@ -30,14 +30,13 @@ from .serializers import (
 )
 
 # =====================================================================
-# 🎛️ FILTERS
+# 🎛️ FILTERS & OTHER VIEWSETS (UNCHANGED)
 # =====================================================================
 class ProductFilter(django_filters.FilterSet):
     min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
     max_price = django_filters.NumberFilter(field_name="price", lookup_expr='lte')
     condition = django_filters.CharFilter(field_name="condition", lookup_expr='exact')
 
-    # Dynamic category & location filters
     category = django_filters.ModelChoiceFilter(
         field_name='category',
         queryset=Category.objects.filter(is_active=True),
@@ -54,9 +53,6 @@ class ProductFilter(django_filters.FilterSet):
         fields = ['min_price', 'max_price', 'condition', 'category', 'location']
 
 
-# =====================================================================
-# 🏪 PRODUCT VIEWSET (OPTIMIZED)
-# =====================================================================
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -65,8 +61,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'description']
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    # 🚀 OPTIMIZED: Uses the centralized serializer optimization method.
-    # This guarantees select_related('seller','category','location') + prefetch_related('photos')
     def get_queryset(self):
         return ProductSerializer.optimize_for_list(
             Product.objects.all()
@@ -79,32 +73,18 @@ class ProductViewSet(viewsets.ModelViewSet):
             Photo.objects.create(product=product_instance, image=image_file)
 
 
-# =====================================================================
-# 🏷️ CATEGORY & LOCATION VIEWSETS (READ-ONLY)
-# =====================================================================
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    Returns a list of active categories for the frontend.
-    Used to populate the category filter dropdown and sidebar.
-    """
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategorySerializer
     permission_classes = [AllowAny]
 
 
 class LocationViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    Returns a list of active locations for the frontend.
-    Used to populate the location filter dropdown.
-    """
     queryset = Location.objects.filter(is_active=True)
     serializer_class = LocationSerializer
     permission_classes = [AllowAny]
 
 
-# =====================================================================
-# 📸 PHOTO VIEWSET
-# =====================================================================
 class PhotoViewSet(viewsets.ModelViewSet):
     queryset = Photo.objects.all()
     serializer_class = PhotoSerializer
@@ -125,36 +105,44 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 💳 FLUTTERWAVE MOBILE MONEY PAYMENT (UGANDA) - OPTIMIZED
+# 💳 PESAPAL PAYMENT TRANSACTION VIEWSET (🔄 URL & PAYLOAD CHANGED)
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
 
-    # 🚀 OPTIMIZED: Uses the centralized serializer optimization method.
     def get_queryset(self):
         return PaymentTransactionSerializer.optimize_queryset(
             PaymentTransaction.objects.all()
         ).order_by('-created_at')
 
+    def _get_pesapal_token(self, consumer_key, consumer_secret, base_url):
+        """Helper to fetch JWT Bearer Token from Pesapal API 3.0"""
+        auth_url = f"{base_url}/api/Auth/RequestToken"
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        payload = {
+            "consumer_key": consumer_key,
+            "consumer_secret": consumer_secret
+        }
+        response = requests.post(auth_url, json=payload, headers=headers, timeout=30)
+        if response.status_code == 200:
+            return response.json().get("token")
+        return None
+
     def create(self, request, *args, **kwargs):
         """
-        Initiate Flutterwave mobile money charge (MTN/AIRTEL Uganda).
+        Initiate Pesapal Order Request (Supports Mobile Money & Cards via Pesapal iframe/redirect).
         """
         payload = request.data
         product_id = payload.get('product')
         phone = payload.get('phone_number')
-        network = payload.get('network', 'MTN').upper()
 
-        if network not in ['MTN', 'AIRTEL']:
-            return Response(
-                {"error": "Network must be 'MTN' or 'AIRTEL'."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
+        consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
+        ipn_id = getattr(settings, 'PESAPAL_IPN_ID', None) # Registered IPN ID from Pesapal dashboard
 
-        flw_secret = getattr(settings, 'FLW_SECRET_KEY', None)
-        if not flw_secret and not settings.DEBUG:
+        if not consumer_key or not consumer_secret:
             return Response(
-                {"error": "Flutterwave secret key not configured."},
+                {"error": "Pesapal credentials not configured."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -165,13 +153,12 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         except Exception:
             fee = 20000.00
 
-        # 🚀 OPTIMIZED: Added select_related to fetch seller in the same query.
         try:
             product = Product.objects.select_related('seller').get(id=product_id, seller=request.user)
         except Product.DoesNotExist:
             return Response({"error": "Product not found or you don't own it."}, status=404)
 
-        unique_ref = f"FLW-UG-{uuid.uuid4().hex[:8].upper()}"
+        unique_ref = f"PP-UG-{uuid.uuid4().hex[:8].upper()}"
         transaction = PaymentTransaction.objects.create(
             product=product,
             amount=fee,
@@ -180,52 +167,62 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             status='PENDING'
         )
 
+        # Determine Environment Base URL
         if settings.DEBUG:
-            flw_url = f"{settings.BASE_URL}/mock-flutterwave/"
-            flw_payload = {
-                "phone_number": phone,
-                "network": network,
-                "amount": str(fee),
-                "currency": "UGX",
-                "email": request.user.email,
-                "tx_ref": unique_ref,
-                "fullname": request.user.get_full_name() or request.user.username,
-                "country": "UG"
-            }
-            headers = {"Content-Type": "application/json"}
-            print(f"🧪 SANDBOX: Using mock Flutterwave endpoint")
+            base_url = "https://cybqa.pesapal.com/pesapalv3"
+            print(f"🧪 SANDBOX: Using Pesapal Demo Environment")
         else:
-            flw_url = "https://api.flutterwave.com/v3/charges?type=mobile_money_uganda"
-            headers = {
-                "Authorization": f"Bearer {flw_secret}",
-                "Content-Type": "application/json"
-            }
-            flw_payload = {
+            base_url = "https://pay.pesapal.com/v3"
+
+        # 1. Get Authentication Token
+        token = self._get_pesapal_token(consumer_key, consumer_secret, base_url)
+        if not token:
+            transaction.status = 'FAILED'
+            transaction.save()
+            return Response({"error": "Failed to authenticate with Pesapal API."}, status=502)
+
+        # 2. Prepare SubmitOrderRequest Payload
+        order_url = f"{base_url}/api/Transactions/SubmitOrderRequest"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
+        order_payload = {
+            "id": unique_ref,
+            "currency": "UGX",
+            "amount": float(fee),
+            "description": f"Promotion fee for product: {product.title[:50]}",
+            "callback_url": f"{settings.BASE_URL}/payment-callback/", # Frontend or backend landing url
+            "notification_id": ipn_id,
+            "billing_address": {
+                "email_address": request.user.email or "client@example.com",
                 "phone_number": phone,
-                "network": network,
-                "amount": str(fee),
-                "currency": "UGX",
-                "email": request.user.email,
-                "tx_ref": unique_ref,
-                "fullname": request.user.get_full_name() or request.user.username,
-                "country": "UG"
+                "first_name": request.user.first_name or "Customer",
+                "last_name": request.user.last_name or "User",
+                "country_code": "UG"
             }
+        }
 
         try:
-            # 🚀🚀🚀 CRITICAL FIX: Increased timeout from 15 to 60 seconds.
-            # This gives Render enough time to wake up (if free tier) AND allows
-            # Flutterwave to process the request without premature failure.
-            response = requests.post(flw_url, json=flw_payload, headers=headers, timeout=60)
+            response = requests.post(order_url, json=order_payload, headers=headers, timeout=60)
             data = response.json()
 
-            if response.status_code in [200, 201] and data.get("status") == "success":
-                print(f"✅ Flutterwave charge initiated for {phone} ({network})")
-                transaction.transaction_id = data.get("data", {}).get("id")
+            if response.status_code in [200, 201] and "redirect_url" in data:
+                print(f"✅ Pesapal order created for Ref: {unique_ref}")
+                transaction.transaction_id = data.get("order_tracking_id")
                 transaction.save()
+                
+                # Return the redirect_url to the frontend so it can open the iframe or redirect
+                serializer = self.get_serializer(transaction)
+                res_data = serializer.data
+                res_data["redirect_url"] = data.get("redirect_url")
+                return Response(res_data, status=status.HTTP_201_CREATED)
             else:
                 transaction.status = 'FAILED'
                 transaction.save()
-                error_msg = data.get("message", "Unknown error")
+                error_msg = data.get("message", "Unknown error from gateway")
                 return Response(
                     {"error": f"Payment initiation failed: {error_msg}"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -246,103 +243,61 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        serializer = self.get_serializer(transaction)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-
 
 # =====================================================================
-# 📡 FLUTTERWAVE WEBHOOK (Charge Completed)
+# 📡 PESAPAL IPN WEBHOOK (🔄 URL & STATUS PARSING CHANGED)
 # =====================================================================
-@api_view(['POST'])
+@api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
-def flutterwave_webhook(request):
-    signature = request.headers.get('Verif-Hash')
-    expected = getattr(settings, 'FLW_SECRET_HASH', None)
-    if not signature or signature != expected:
-        print("⚠️ Invalid or missing Verif-Hash")
-        return Response({"error": "Unauthorised"}, status=401)
+def pesapal_webhook(request):
+    """
+    Pesapal pings this URL when a payment changes state.
+    Note: Pesapal sends query parameters (GET) or a JSON payload (POST) depending on configuration.
+    """
+    order_tracking_id = request.GET.get('OrderTrackingId') or request.data.get('OrderTrackingId')
+    merchant_reference = request.GET.get('OrderMerchantReference') or request.data.get('OrderMerchantReference')
 
-    payload = request.data
-    event = payload.get('event')
+    if not order_tracking_id or not merchant_reference:
+        return Response({"error": "Missing tracking parameters"}, status=400)
 
-    if event == "charge.completed":
-        data = payload.get('data', {})
-        tx_ref = data.get('tx_ref')
-        status_flag = data.get('status')
+    # To securely verify status, query Pesapal API directly using the tracking ID
+    consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
+    consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
+    base_url = "https://cybqa.pesapal.com/pesapalv3" if settings.DEBUG else "https://pay.pesapal.com/v3"
+    
+    # Instantiate viewset helper to fetch token
+    temp_vs = PaymentTransactionViewSet()
+    token = temp_vs._get_pesapal_token(consumer_key, consumer_secret, base_url)
 
-        if status_flag == "successful" and tx_ref:
+    if token:
+        status_url = f"{base_url}/api/Transactions/GetTransactionStatus?orderTrackingId={order_tracking_id}"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        status_resp = requests.get(status_url, headers=headers, timeout=30)
+        
+        if status_resp.status_code == 200:
+            status_data = status_resp.json()
+            payment_status = status_data.get('payment_status_description') # e.g. Completed, Failed
+            
             try:
-                tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
-                tx.status = 'SUCCESSFUL'
-                tx.save()
-                tx.product.is_featured = True
-                tx.product.save()
-                print(f"✅ Transaction {tx_ref} marked successful.")
+                tx = PaymentTransaction.objects.get(tx_ref=merchant_reference)
+                if payment_status == "Completed":
+                    tx.status = 'SUCCESSFUL'
+                    tx.save()
+                    tx.product.is_featured = True
+                    tx.product.save()
+                    print(f"✅ Pesapal Transaction {merchant_reference} marked successful.")
+                elif payment_status == "Failed":
+                    tx.status = 'FAILED'
+                    tx.save()
+                    print(f"❌ Pesapal Transaction {merchant_reference} failed.")
             except PaymentTransaction.DoesNotExist:
-                print(f"⚠️ Transaction {tx_ref} not found.")
-    else:
-        print(f"ℹ️ Ignored event: {event}")
+                print(f"⚠️ Transaction reference {merchant_reference} not found in database.")
 
     return Response({"status": "acknowledged"}, status=200)
 
 
 # =====================================================================
-# 🧪 MOCK FLUTTERWAVE SANDBOX
-# =====================================================================
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def mock_flutterwave(request):
-    if not settings.DEBUG:
-        return Response({"error": "Mock only in DEBUG"}, status=404)
-
-    payload = request.data
-    tx_ref = payload.get('tx_ref', 'MOCK-REF-001')
-    print(f"🧪 Mock Flutterwave called for tx_ref: {tx_ref}")
-
-    return Response({
-        "status": "success",
-        "message": "Charge initiated (MOCK)",
-        "data": {
-            "id": 123456,
-            "tx_ref": tx_ref,
-            "flw_ref": "FLW-MOCK-001",
-            "amount": payload.get('amount'),
-            "charged_amount": payload.get('amount'),
-            "status": "pending"
-        }
-    }, status=200)
-
-
-# =====================================================================
-# 🔧 TEST PAYMENT CONFIRMATION
-# =====================================================================
-class TestPaymentView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        if not settings.DEBUG:
-            return Response({"error": "Test endpoint only in DEBUG"}, status=404)
-
-        tx_ref = request.data.get('tx_ref')
-        if not tx_ref:
-            return Response({"error": "tx_ref required"}, status=400)
-
-        try:
-            tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
-            tx.status = 'SUCCESSFUL'
-            tx.save()
-            tx.product.is_featured = True
-            tx.product.save()
-            return Response({
-                "status": "success",
-                "message": f"Transaction {tx_ref} marked successful"
-            })
-        except PaymentTransaction.DoesNotExist:
-            return Response({"error": "Transaction not found"}, status=404)
-
-
-# =====================================================================
-# ⚙️ SITE CONFIGURATION (Promotion Fee)
+# 📝 UNCHANGED UTILITY & GENERAL VIEWS
 # =====================================================================
 class SiteConfigView(APIView):
     permission_classes = [AllowAny]
@@ -353,9 +308,6 @@ class SiteConfigView(APIView):
         return Response({"promotion_fee": fee})
 
 
-# =====================================================================
-# 📝 NOTE, USER, CHART, IMAGE VIEWS
-# =====================================================================
 class NoteListCreate(generics.ListCreateAPIView):
     serializer_class = NoteSerializer
     permission_classes = [IsAuthenticated]
@@ -366,8 +318,6 @@ class NoteListCreate(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         if serializer.is_valid():
             serializer.save(author=self.request.user)
-        else:
-            print(serializer.errors)
 
 
 class NoteDelete(generics.DestroyAPIView):
@@ -390,14 +340,13 @@ class ChartDataView2(APIView):
         x = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
         y1 = [r.value1 for r in readings]
         y2 = [r.value2 for r in readings]
-        chart_data = {
+        return Response({
             "data": [
                 {"x": x, "y": y1, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 1"},
                 {"x": x, "y": y2, "type": "scatter", "mode": "lines+markers", "name": "Stock Value 2"}
             ],
             "layout": {"title": "Stock Market Reading", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
-        }
-        return Response(chart_data)
+        })
 
 
 class ChartDataView(APIView):
@@ -405,11 +354,10 @@ class ChartDataView(APIView):
         readings = SensorReading.objects.all().order_by('timestamp')
         x = [r.timestamp.strftime('%Y-%m-%d %H:%M:%S') for r in readings]
         y = [r.value for r in readings]
-        chart_data = {
+        return Response({
             "data": [{"x": x, "y": y, "type": "scatter", "mode": "lines+markers", "name": "Sensor"}],
             "layout": {"title": "Sensor Data", "xaxis": {"title": "Time"}, "yaxis": {"title": "Value"}}
-        }
-        return Response(chart_data)
+        })
 
 
 class ImageListView(generics.ListAPIView):
