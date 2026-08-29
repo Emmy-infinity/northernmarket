@@ -9,7 +9,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     Product, Photo, Category, Location, SiteConfiguration,
     PaymentTransaction, Note, SensorReading, StockMarketReading,
-    UserProfile
+    UserProfile, SearchQuery, ProductClick
 )
 
 
@@ -28,7 +28,6 @@ class ProductAdmin(ModelAdmin):
     inlines = [PhotoInline]
     
     # 🚀 OPTIMIZATION: Fetches seller, category, and location in a single SQL query.
-    # Without this, the admin list page runs 1 query per row for each foreign key.
     list_select_related = ('seller', 'category', 'location')
     
     fieldsets = (
@@ -75,7 +74,6 @@ class SiteConfigurationAdmin(ModelAdmin):
 
 
 # ─── USER ADMIN (Unfold‑styled) ────────────────────────────────────
-# Unregister the default User admin
 admin.site.unregister(User)
 
 @admin.register(User)
@@ -93,10 +91,29 @@ class PaymentTransactionAdmin(ModelAdmin):
     list_filter = ('status', 'created_at')
     search_fields = ('tx_ref', 'transaction_id', 'phone_number', 'product__title')
     
-    # 🚀 OPTIMIZATION: Fetches the related Product in a single SQL query.
     list_select_related = ('product',)
     
     readonly_fields = ('tx_ref', 'transaction_id', 'created_at')
+
+
+# ─── SEARCH QUERY ADMIN (ANALYTICS) ──────────────────────────────────
+@admin.register(SearchQuery)
+class SearchQueryAdmin(ModelAdmin):
+    list_display = ('query', 'device_type', 'browser', 'os', 'user', 'ip_address', 'created_at')
+    list_filter = ('device_type', 'browser', 'os', 'created_at')
+    search_fields = ('query', 'ip_address', 'user__username')
+    list_select_related = ('user',)  # efficient if displaying user
+    readonly_fields = ('created_at',)
+
+
+# ─── PRODUCT CLICK ADMIN (ANALYTICS) ─────────────────────────────────
+@admin.register(ProductClick)
+class ProductClickAdmin(ModelAdmin):
+    list_display = ('product', 'search_query', 'device_type', 'browser', 'os', 'is_detail_view', 'clicked_at')
+    list_filter = ('device_type', 'browser', 'os', 'is_detail_view', 'clicked_at')
+    search_fields = ('product__title', 'search_query', 'ip_address')
+    list_select_related = ('product', 'user')  # efficient for product title and user
+    readonly_fields = ('clicked_at',)
 
 
 # ─── USER PROFILE ADMIN ──────────────────────────────────────────────
