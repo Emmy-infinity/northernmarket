@@ -116,7 +116,6 @@ class Product(models.Model):
         ordering = ['-created_at']
         indexes = [
             # 🚀 OPTIMIZATION: Composite indexes for the most common e-commerce queries.
-            # This replaces the duplicate single-field indexes you had earlier.
             models.Index(fields=['is_featured', 'featured_until'], name='prod_feat_until_idx'),
             models.Index(fields=['category', 'price'], name='prod_cat_price_idx'),
             models.Index(fields=['location', '-created_at'], name='prod_loc_created_idx'),
@@ -170,6 +169,65 @@ class PaymentTransaction(models.Model):
         return f"TX: {self.tx_ref} - {self.status}"
 
 
+# =====================================================================
+# 🔍 SEARCH & CLICK ANALYTICS (NEW)
+# =====================================================================
+class SearchQuery(models.Model):
+    """
+    Records every search performed on the platform, including device and browser info.
+    """
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='search_queries')
+    session_key = models.CharField(max_length=40, null=True, blank=True, db_index=True, help_text="For anonymous users")
+    query = models.CharField(max_length=255, db_index=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, help_text="Raw User-Agent string")
+    device_type = models.CharField(max_length=20, blank=True, db_index=True)  # Mobile, Tablet, Desktop
+    browser = models.CharField(max_length=50, blank=True, db_index=True)
+    os = models.CharField(max_length=50, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Search Query'
+        verbose_name_plural = 'Search Queries'
+
+    def __str__(self):
+        return f"{self.query} - {self.created_at}"
+
+
+class ProductClick(models.Model):
+    """
+    Tracks product clicks (especially detail views) with device analytics.
+    """
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='clicks')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='product_clicks')
+    session_key = models.CharField(max_length=40, null=True, blank=True, db_index=True, help_text="For anonymous users")
+    search_query = models.CharField(max_length=255, null=True, blank=True, db_index=True, help_text="Search query that led to this click")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    referer = models.URLField(max_length=500, null=True, blank=True, help_text="Page URL where the click occurred")
+    user_agent = models.TextField(blank=True, help_text="Raw User-Agent string")
+    device_type = models.CharField(max_length=20, blank=True, db_index=True)
+    browser = models.CharField(max_length=50, blank=True, db_index=True)
+    os = models.CharField(max_length=50, blank=True, db_index=True)
+    is_detail_view = models.BooleanField(default=True, help_text="True if this click opened the product detail page")
+    clicked_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-clicked_at']
+        verbose_name = 'Product Click'
+        verbose_name_plural = 'Product Clicks'
+        indexes = [
+            models.Index(fields=['product', 'clicked_at'], name='click_prod_time_idx'),
+            models.Index(fields=['search_query', 'clicked_at'], name='click_search_time_idx'),
+        ]
+
+    def __str__(self):
+        return f"Click on {self.product.title} at {self.clicked_at}"
+
+
+# =====================================================================
+# LEGACY MODELS
+# =====================================================================
 class Note(models.Model):
     title = models.CharField(max_length=100)
     content = models.TextField()
