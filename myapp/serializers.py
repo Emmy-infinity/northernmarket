@@ -1,12 +1,13 @@
-
 from django.contrib.auth import get_user_model
-User = get_user_model()
 from django.utils import timezone
 from rest_framework import serializers
 from .models import (
     Note, SensorReading, Photo, Product, PaymentTransaction,
-    Category, Location
+    Category, Location, SearchQuery, ProductClick,
+    StockMarketReading, SiteConfiguration, UserProfile
 )
+
+User = get_user_model()
 
 # =====================================================================
 # 🔐 1. USER & AUTHENTICATION SERIALIZERS
@@ -19,6 +20,14 @@ class UserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    user = serializers.ReadOnlyField(source='user.username')
+
+    class Meta:
+        model = UserProfile
+        fields = ['id', 'user', 'phone_number', 'whatsapp_number']
 
 
 # =====================================================================
@@ -41,7 +50,6 @@ class LocationSerializer(serializers.ModelSerializer):
 # =====================================================================
 class PaymentTransactionSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    # ✅ This uses source='product.title'. It relies on the view to prefetch 'product'.
     product_title = serializers.CharField(source='product.title', read_only=True)
 
     class Meta:
@@ -52,14 +60,9 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'status', 'transaction_id', 'tx_ref', 'created_at']
 
-    # 🚀 OPTIMIZATION METHOD: Call this in your views to prevent N+1 queries.
     @staticmethod
     def optimize_queryset(queryset):
-        """
-        Prefetches the related Product in a single SQL query.
-        Use this in your list/retrieve views:
-            qs = PaymentTransactionSerializer.optimize_queryset(PaymentTransaction.objects.all())
-        """
+        """Prefetches related product to avoid N+1 queries."""
         return queryset.select_related('product')
 
 
@@ -71,7 +74,8 @@ class PhotoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Photo
-        fields = ['id', 'image_url']
+        fields = ['id', 'image_url', 'product', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
     def get_image_url(self, obj):
         if obj.image:
@@ -86,24 +90,24 @@ class PhotoSerializer(serializers.ModelSerializer):
 # 🌾 5. PRODUCT SERIALIZER (FULLY OPTIMIZED)
 # =====================================================================
 class ProductSerializer(serializers.ModelSerializer):
-    # ─── Seller fields ──────────────────────────────────────────────
+    # Seller fields
     seller = serializers.ReadOnlyField(source='seller.id')
     seller_username = serializers.ReadOnlyField(source='seller.username')
     seller_email = serializers.ReadOnlyField(source='seller.email')
 
-    # ─── Photos ─────────────────────────────────────────────────────
+    # Photos
     photos = PhotoSerializer(many=True, read_only=True)
 
-    # ─── Condition display ──────────────────────────────────────────
+    # Condition display
     condition_display = serializers.ReadOnlyField(source='get_condition_display')
 
-    # ─── DYNAMIC CATEGORY & LOCATION FIELDS ──────────────────────
+    # Dynamic category & location fields
     category_name = serializers.CharField(source='category.name', read_only=True)
     category_slug = serializers.CharField(source='category.slug', read_only=True)
     location_name = serializers.CharField(source='location.name', read_only=True)
     location_code = serializers.CharField(source='location.code', read_only=True)
 
-    # ─── Custom fields ─────────────────────────────────────────────
+    # Custom fields
     days_since_listing = serializers.SerializerMethodField()
     bulk_delivery_estimate_ugx = serializers.SerializerMethodField()
 
@@ -116,21 +120,21 @@ class ProductSerializer(serializers.ModelSerializer):
             'price',
             'condition', 'condition_display',
             'stock_count',
-            # ─── Dynamic fields ──────────────────────────────────
+            # Dynamic fields
             'category', 'category_name', 'category_slug',
             'location', 'location_name', 'location_code',
-            # ─── Legacy fields ──────────────────────────────────
+            # Legacy fields
             'seller_location_details',
             'weight',
             'contact_phone',
-            # ─── Media & rankings ────────────────────────────────
+            # Media & rankings
             'photos',
-            'is_featured',
+            'is_featured', 'featured_until',
             'created_at',
             'days_since_listing',
             'bulk_delivery_estimate_ugx'
         ]
-        read_only_fields = ['id', 'is_featured', 'created_at']
+        read_only_fields = ['id', 'is_featured', 'featured_until', 'created_at']
 
     def get_days_since_listing(self, obj):
         delta = timezone.now() - obj.created_at
@@ -141,34 +145,45 @@ class ProductSerializer(serializers.ModelSerializer):
             return 7000
         return int(5000 + (float(obj.weight) * 2500))
 
-    # 🚀 OPTIMIZATION METHODS: Call these in your views to prevent N+1 queries.
     @staticmethod
     def optimize_for_list(queryset):
-        """
-        Optimizes queryset for LIST views (e.g., /api/products/).
-        Fetches sellers, categories, locations (join) + all photos (1 extra query).
-        """
         return queryset.select_related(
             'seller', 'category', 'location'
-        ).prefetch_related(
-            'photos'
-        )
+        ).prefetch_related('photos')
 
     @staticmethod
     def optimize_for_detail(queryset):
-        """
-        Optimizes queryset for DETAIL views (e.g., /api/products/1/).
-        Same as list, but you might add more prefetches later (e.g., related payments).
-        """
         return queryset.select_related(
             'seller', 'category', 'location'
-        ).prefetch_related(
-            'photos'
-        )
+        ).prefetch_related('photos')
 
 
 # =====================================================================
-# 📝 6. NOTE SERIALIZER
+# 🔍 6. SEARCH QUERY & PRODUCT CLICK SERIALIZERS (ANALYTICS)
+# =====================================================================
+class SearchQuerySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SearchQuery
+        fields = ['id', 'query', 'session_key', 'user', 'ip_address',
+                  'device_type', 'browser', 'os', 'created_at']
+        read_only_fields = ['id', 'user', 'ip_address', 'device_type',
+                            'browser', 'os', 'created_at']
+
+
+class ProductClickSerializer(serializers.ModelSerializer):
+    product_title = serializers.ReadOnlyField(source='product.title')
+
+    class Meta:
+        model = ProductClick
+        fields = ['id', 'product', 'product_title', 'user', 'session_key',
+                  'search_query', 'ip_address', 'referer', 'device_type',
+                  'browser', 'os', 'is_detail_view', 'clicked_at']
+        read_only_fields = ['id', 'user', 'ip_address', 'referer',
+                            'device_type', 'browser', 'os', 'clicked_at']
+
+
+# =====================================================================
+# 📝 7. NOTE SERIALIZER
 # =====================================================================
 class NoteSerializer(serializers.ModelSerializer):
     class Meta:
@@ -178,7 +193,7 @@ class NoteSerializer(serializers.ModelSerializer):
 
 
 # =====================================================================
-# 📊 7. SENSOR READING SERIALIZER
+# 📊 8. SENSOR & STOCK MARKET READING SERIALIZERS
 # =====================================================================
 class SensorReadingSerializer(serializers.ModelSerializer):
     x = serializers.DateTimeField(source='timestamp', format='%Y-%m-%d %H:%M:%S')
@@ -187,3 +202,23 @@ class SensorReadingSerializer(serializers.ModelSerializer):
     class Meta:
         model = SensorReading
         fields = ['x', 'y']
+
+
+class StockMarketReadingSerializer(serializers.ModelSerializer):
+    x = serializers.DateTimeField(source='timestamp', format='%Y-%m-%d %H:%M:%S')
+    y1 = serializers.FloatField(source='value1')
+    y2 = serializers.FloatField(source='value2')
+
+    class Meta:
+        model = StockMarketReading
+        fields = ['x', 'y1', 'y2']
+
+
+# =====================================================================
+# ⚙️ 9. SITE CONFIGURATION SERIALIZER
+# =====================================================================
+class SiteConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SiteConfiguration
+        fields = ['id', 'promotion_fee', 'updated_at']
+        read_only_fields = ['id', 'updated_at']
