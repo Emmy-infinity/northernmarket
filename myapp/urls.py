@@ -21,6 +21,10 @@ urlpatterns = [
     # ─── 1. WEBHOOKS (🔄 CHANGED: Mapped to Pesapal IPN listener view) ──
     path('payments/webhook/', views.pesapal_webhook, name='pesapal_webhook'),
 
+    # ─── 1b. ANALYTICS TRACKING ENDPOINTS (NEW) ──────────────────────
+    path('track-search/', views.SearchQueryCreateView.as_view(), name='track-search'),
+    path('track-click/', views.ProductClickCreateView.as_view(), name='track-click'),
+
     # ─── 2. MOCK & TEST ENDPOINTS (Development-only) ──────────────────
     # Note: Pesapal uses sandbox URLs built-in (cybqa.pesapal.com), 
     # so custom mock views are usually bypassed unless you want a local testing harness.
