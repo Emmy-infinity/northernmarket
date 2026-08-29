@@ -28,7 +28,7 @@ urlpatterns = [
     # ─── 2. MOCK & TEST ENDPOINTS (Development-only) ──────────────────
     # Note: Pesapal uses sandbox URLs built-in (cybqa.pesapal.com), 
     # so custom mock views are usually bypassed unless you want a local testing harness.
-    path('test-payment/', views.TestPaymentView.as_view(), name='test-payment'),
+    #path('test-payment/', views.TestPaymentView.as_view(), name='test-payment'),
 
     # ─── 3. CONFIGURATION & UTILITY ENDPOINTS ──────────────────────────
     path('site-config/', views.SiteConfigView.as_view(), name='site-config'),
