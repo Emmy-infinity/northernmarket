@@ -16,7 +16,7 @@ import django_filters
 from .models import (
     Note, SensorReading, Photo, StockMarketReading,
     Product, PaymentTransaction, SiteConfiguration,
-    Category, Location
+    Category, Location, SearchQuery, ProductClick
 )
 from .serializers import (
     SensorReadingSerializer,
@@ -26,8 +26,56 @@ from .serializers import (
     ProductSerializer,
     PaymentTransactionSerializer,
     CategorySerializer,
-    LocationSerializer
+    LocationSerializer,
+    SearchQuerySerializer,
+    ProductClickSerializer,
 )
+
+# =====================================================================
+# 🔍 USER-AGENT PARSING HELPER (for analytics)
+# =====================================================================
+def parse_user_agent(user_agent_str):
+    """Simple parser to extract device type, browser, and OS from User-Agent string."""
+    ua = user_agent_str.lower()
+
+    # Device type
+    if 'mobile' in ua or 'android' in ua or 'iphone' in ua:
+        device = 'Mobile'
+    elif 'tablet' in ua or 'ipad' in ua:
+        device = 'Tablet'
+    else:
+        device = 'Desktop'
+
+    # Browser
+    if 'edg/' in ua:
+        browser = 'Edge'
+    elif 'chrome' in ua and 'chromium' in ua:
+        browser = 'Chrome'
+    elif 'firefox' in ua:
+        browser = 'Firefox'
+    elif 'safari' in ua and 'chrome' not in ua:
+        browser = 'Safari'
+    elif 'opera' in ua or 'opr/' in ua:
+        browser = 'Opera'
+    else:
+        browser = 'Other'
+
+    # OS
+    if 'windows' in ua:
+        os = 'Windows'
+    elif 'android' in ua:
+        os = 'Android'
+    elif 'iphone' in ua or 'ipad' in ua or 'ios' in ua:
+        os = 'iOS'
+    elif 'mac os' in ua or 'macintosh' in ua:
+        os = 'macOS'
+    elif 'linux' in ua:
+        os = 'Linux'
+    else:
+        os = 'Other'
+
+    return device, browser, os
+
 
 # =====================================================================
 # 🎛️ FILTERS & OTHER VIEWSETS (UNCHANGED)
@@ -105,6 +153,56 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
+# 🔍 SEARCH QUERY & PRODUCT CLICK TRACKING (ANALYTICS)
+# =====================================================================
+class SearchQueryCreateView(generics.CreateAPIView):
+    """
+    Records a search query along with device analytics.
+    Accepts: query (required), session_key (optional)
+    """
+    queryset = SearchQuery.objects.all()
+    serializer_class = SearchQuerySerializer
+    permission_classes = [AllowAny]  # Anonymous users can search
+
+    def perform_create(self, serializer):
+        user_agent = self.request.META.get('HTTP_USER_AGENT', '')
+        device, browser, os = parse_user_agent(user_agent)
+        serializer.save(
+            user=self.request.user if self.request.user.is_authenticated else None,
+            session_key=self.request.data.get('session_key'),
+            ip_address=self.request.META.get('REMOTE_ADDR'),
+            user_agent=user_agent,
+            device_type=device,
+            browser=browser,
+            os=os,
+        )
+
+
+class ProductClickCreateView(generics.CreateAPIView):
+    """
+    Records a product click (detail view) with device analytics.
+    Accepts: product (id), search_query (optional), session_key (optional), is_detail_view (optional)
+    """
+    queryset = ProductClick.objects.all()
+    serializer_class = ProductClickSerializer
+    permission_classes = [AllowAny]  # Anonymous users can click
+
+    def perform_create(self, serializer):
+        user_agent = self.request.META.get('HTTP_USER_AGENT', '')
+        device, browser, os = parse_user_agent(user_agent)
+        serializer.save(
+            user=self.request.user if self.request.user.is_authenticated else None,
+            session_key=self.request.data.get('session_key'),
+            ip_address=self.request.META.get('REMOTE_ADDR'),
+            referer=self.request.META.get('HTTP_REFERER'),
+            user_agent=user_agent,
+            device_type=device,
+            browser=browser,
+            os=os,
+        )
+
+
+# =====================================================================
 # 💳 PESAPAL PAYMENT TRANSACTION VIEWSET (🔄 URL & PAYLOAD CHANGED)
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
@@ -138,7 +236,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
         consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
         consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
-        ipn_id = getattr(settings, 'PESAPAL_IPN_ID', None) # Registered IPN ID from Pesapal dashboard
+        ipn_id = getattr(settings, 'PESAPAL_IPN_ID', None)
 
         if not consumer_key or not consumer_secret:
             return Response(
@@ -194,7 +292,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             "currency": "UGX",
             "amount": float(fee),
             "description": f"Promotion fee for product: {product.title[:50]}",
-            "callback_url": f"{settings.BASE_URL}/payment-callback/", # Frontend or backend landing url
+            "callback_url": f"{settings.BASE_URL}/payment-callback/",
             "notification_id": ipn_id,
             "billing_address": {
                 "email_address": request.user.email or "client@example.com",
@@ -214,7 +312,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 transaction.transaction_id = data.get("order_tracking_id")
                 transaction.save()
                 
-                # Return the redirect_url to the frontend so it can open the iframe or redirect
                 serializer = self.get_serializer(transaction)
                 res_data = serializer.data
                 res_data["redirect_url"] = data.get("redirect_url")
@@ -252,7 +349,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 def pesapal_webhook(request):
     """
     Pesapal pings this URL when a payment changes state.
-    Note: Pesapal sends query parameters (GET) or a JSON payload (POST) depending on configuration.
     """
     order_tracking_id = request.GET.get('OrderTrackingId') or request.data.get('OrderTrackingId')
     merchant_reference = request.GET.get('OrderMerchantReference') or request.data.get('OrderMerchantReference')
@@ -260,12 +356,10 @@ def pesapal_webhook(request):
     if not order_tracking_id or not merchant_reference:
         return Response({"error": "Missing tracking parameters"}, status=400)
 
-    # To securely verify status, query Pesapal API directly using the tracking ID
     consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
     consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
     base_url = "https://cybqa.pesapal.com/pesapalv3" if settings.DEBUG else "https://pay.pesapal.com/v3"
     
-    # Instantiate viewset helper to fetch token
     temp_vs = PaymentTransactionViewSet()
     token = temp_vs._get_pesapal_token(consumer_key, consumer_secret, base_url)
 
@@ -276,7 +370,7 @@ def pesapal_webhook(request):
         
         if status_resp.status_code == 200:
             status_data = status_resp.json()
-            payment_status = status_data.get('payment_status_description') # e.g. Completed, Failed
+            payment_status = status_data.get('payment_status_description')
             
             try:
                 tx = PaymentTransaction.objects.get(tx_ref=merchant_reference)
