@@ -78,7 +78,7 @@ class Product(models.Model):
     description = models.TextField()
 
     # Financials & Inventory
-    price = models.DecimalField(max_digits=12, decimal_places=2, db_index=True)
+    price = models.DecimalField(max_digits=12, decimal_places=2,blank=True, db_index=True)
     condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED', db_index=True)
     stock_count = models.PositiveIntegerField(default=1)
 
