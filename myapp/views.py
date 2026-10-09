@@ -3,12 +3,13 @@ import requests
 import json
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.db.models import Max
 from rest_framework import generics, viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
@@ -78,7 +79,7 @@ def parse_user_agent(user_agent_str):
 
 
 # =====================================================================
-# 🎛️ FILTERS & OTHER VIEWSETS (UNCHANGED)
+# 🎛️ FILTERS
 # =====================================================================
 class ProductFilter(django_filters.FilterSet):
     min_price = django_filters.NumberFilter(field_name="price", lookup_expr='gte')
@@ -101,6 +102,9 @@ class ProductFilter(django_filters.FilterSet):
         fields = ['min_price', 'max_price', 'condition', 'category', 'location']
 
 
+# =====================================================================
+# 📦 PRODUCT VIEWSET — with dynamic price-bounds action
+# =====================================================================
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -120,7 +124,43 @@ class ProductViewSet(viewsets.ModelViewSet):
         for image_file in uploaded_images:
             Photo.objects.create(product=product_instance, image=image_file)
 
+    # ─── Dynamic price bounds for the frontend slider ────────────
+    @action(detail=False, methods=['get'], url_path='price-bounds', permission_classes=[AllowAny])
+    def price_bounds(self, request):
+        """
+        Returns the min/max price of all products so the frontend
+        slider scales automatically instead of being hardcoded.
 
+        Response:
+            {
+                "min_price": 0,
+                "max_price": 5000000,     # rounded ceiling for slider
+                "actual_max": 4750000.0   # actual highest product price
+            }
+        """
+        agg = Product.objects.aggregate(max_price=Max('price'))
+        max_price = agg.get('max_price') or 0
+
+        if max_price <= 0:
+            ceiling = 5_000_000
+        else:
+            # Round up to a clean magnitude:
+            #   4,750,000  ->  5,000,000
+            #   12,300,000 -> 20,000,000
+            #   87,000,000 -> 90,000,000
+            magnitude = 10 ** (len(str(int(max_price))) - 1)
+            ceiling = int((int(max_price) // magnitude + 1) * magnitude)
+
+        return Response({
+            "min_price": 0,
+            "max_price": ceiling,
+            "actual_max": float(max_price),
+        })
+
+
+# =====================================================================
+# 🗂️ CATEGORIES & LOCATIONS
+# =====================================================================
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Category.objects.filter(is_active=True)
     serializer_class = CategorySerializer
@@ -133,6 +173,9 @@ class LocationViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
 
 
+# =====================================================================
+# 🖼️ PHOTOS
+# =====================================================================
 class PhotoViewSet(viewsets.ModelViewSet):
     queryset = Photo.objects.all()
     serializer_class = PhotoSerializer
@@ -162,7 +205,7 @@ class SearchQueryCreateView(generics.CreateAPIView):
     """
     queryset = SearchQuery.objects.all()
     serializer_class = SearchQuerySerializer
-    permission_classes = [AllowAny]  # Anonymous users can search
+    permission_classes = [AllowAny]
 
     def perform_create(self, serializer):
         user_agent = self.request.META.get('HTTP_USER_AGENT', '')
@@ -185,7 +228,7 @@ class ProductClickCreateView(generics.CreateAPIView):
     """
     queryset = ProductClick.objects.all()
     serializer_class = ProductClickSerializer
-    permission_classes = [AllowAny]  # Anonymous users can click
+    permission_classes = [AllowAny]
 
     def perform_create(self, serializer):
         user_agent = self.request.META.get('HTTP_USER_AGENT', '')
@@ -203,7 +246,7 @@ class ProductClickCreateView(generics.CreateAPIView):
 
 
 # =====================================================================
-# 💳 PESAPAL PAYMENT TRANSACTION VIEWSET (🔄 URL & PAYLOAD CHANGED)
+# 💳 PESAPAL PAYMENT TRANSACTION VIEWSET
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
@@ -286,7 +329,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-        
+
         order_payload = {
             "id": unique_ref,
             "currency": "UGX",
@@ -311,7 +354,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 print(f"✅ Pesapal order created for Ref: {unique_ref}")
                 transaction.transaction_id = data.get("order_tracking_id")
                 transaction.save()
-                
+
                 serializer = self.get_serializer(transaction)
                 res_data = serializer.data
                 res_data["redirect_url"] = data.get("redirect_url")
@@ -342,7 +385,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 📡 PESAPAL IPN WEBHOOK (🔄 URL & STATUS PARSING CHANGED)
+# 📡 PESAPAL IPN WEBHOOK
 # =====================================================================
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
@@ -359,7 +402,7 @@ def pesapal_webhook(request):
     consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
     consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
     base_url = "https://cybqa.pesapal.com/pesapalv3" if settings.DEBUG else "https://pay.pesapal.com/v3"
-    
+
     temp_vs = PaymentTransactionViewSet()
     token = temp_vs._get_pesapal_token(consumer_key, consumer_secret, base_url)
 
@@ -367,11 +410,11 @@ def pesapal_webhook(request):
         status_url = f"{base_url}/api/Transactions/GetTransactionStatus?orderTrackingId={order_tracking_id}"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         status_resp = requests.get(status_url, headers=headers, timeout=30)
-        
+
         if status_resp.status_code == 200:
             status_data = status_resp.json()
             payment_status = status_data.get('payment_status_description')
-            
+
             try:
                 tx = PaymentTransaction.objects.get(tx_ref=merchant_reference)
                 if payment_status == "Completed":
@@ -391,7 +434,7 @@ def pesapal_webhook(request):
 
 
 # =====================================================================
-# 📝 UNCHANGED UTILITY & GENERAL VIEWS
+# 📝 UTILITY & GENERAL VIEWS
 # =====================================================================
 class SiteConfigView(APIView):
     permission_classes = [AllowAny]
