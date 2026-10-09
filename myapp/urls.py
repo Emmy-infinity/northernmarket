@@ -24,6 +24,8 @@ urlpatterns = [
     # ─── 1b. ANALYTICS TRACKING ENDPOINTS (NEW) ──────────────────────
     path('track-search/', views.SearchQueryCreateView.as_view(), name='track-search'),
     path('track-click/', views.ProductClickCreateView.as_view(), name='track-click'),
+    # products/urls.py
+    path('api/products/price-bounds/', price_bounds, name='price-bounds'),
 
     # ─── 2. MOCK & TEST ENDPOINTS (Development-only) ──────────────────
     # Note: Pesapal uses sandbox URLs built-in (cybqa.pesapal.com), 
