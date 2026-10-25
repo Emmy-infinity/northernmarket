@@ -120,14 +120,19 @@ class PhotoSerializer(serializers.ModelSerializer):
 
     def get_image_url(self, obj):
         if obj.image:
-            # Convert CloudinaryField to string to get the raw path
-            raw_path = str(obj.image)
+            # 1. Try to get the URL directly from the storage backend
+            try:
+                url = obj.image.url
+                if url and url.startswith('http'):
+                    return url
+            except Exception:
+                pass
             
-            # If it's already a full URL, return it
+            # 2. Fallback: Manually build the full Cloudinary URL
+            raw_path = str(obj.image)
             if raw_path.startswith('http'):
                 return raw_path
-            
-            # ✅ Manually build the full Cloudinary URL
+                
             cloud_name = getattr(settings, 'CLOUDINARY_CLOUD_NAME', None)
             if cloud_name and raw_path:
                 clean_path = raw_path.lstrip('/')
