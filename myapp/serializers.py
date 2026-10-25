@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.db import transaction
+from django.conf import settings
 from rest_framework import serializers
 from .models import (
     Note, SensorReading, Photo, Product, PaymentTransaction,
@@ -52,7 +53,6 @@ class UserSerializer(serializers.ModelSerializer):
         validated_data.pop('password2')
         
         try:
-            # ✅ Uses transaction.atomic so nothing is half-created
             with transaction.atomic():
                 user = User.objects.create_user(
                     username=validated_data['username'],
@@ -62,7 +62,6 @@ class UserSerializer(serializers.ModelSerializer):
                     password=validated_data['password']
                 )
                 
-                # ✅ get_or_create prevents duplicate key errors
                 profile, created = UserProfile.objects.get_or_create(user=user)
                 profile.phone_number = phone_number
                 profile.whatsapp_number = whatsapp_number
@@ -109,7 +108,7 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
 
 
 # =====================================================================
-# 📸 4. PHOTO SERIALIZER
+# 📸 4. PHOTO SERIALIZER (FIXED FOR CLOUDINARY)
 # =====================================================================
 class PhotoSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
@@ -121,10 +120,19 @@ class PhotoSerializer(serializers.ModelSerializer):
 
     def get_image_url(self, obj):
         if obj.image:
-            try:
-                return obj.image.url
-            except AttributeError:
-                return str(obj.image)
+            # Convert CloudinaryField to string to get the raw path
+            raw_path = str(obj.image)
+            
+            # If it's already a full URL, return it
+            if raw_path.startswith('http'):
+                return raw_path
+            
+            # ✅ Manually build the full Cloudinary URL
+            cloud_name = getattr(settings, 'CLOUDINARY_CLOUD_NAME', None)
+            if cloud_name and raw_path:
+                clean_path = raw_path.lstrip('/')
+                return f"https://res.cloudinary.com/{cloud_name}/{clean_path}"
+                
         return None
 
 
