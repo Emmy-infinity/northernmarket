@@ -45,8 +45,11 @@ urlpatterns = [
     path('images/', views.ImageListView.as_view(), name='image-list'),
     path('upload/', views.ImageUploadView.as_view(), name='image-upload'),
 
-    # ─── 7. USER REGISTRATION ────────────────────────────────────────
-    path('register/', views.CreateUserView.as_view(), name='register'),
+    # ─── 7. USER AUTHENTICATION & PROFILE ────────────────────────────
+    # ✅ FIXED: Added 'user/' to match React's 'api/user/register/'
+    path('user/register/', views.CreateUserView.as_view(), name='register'),
+    # ✅ NEW: Fetch logged-in user's profile data
+    path('user/profile/', views.CurrentUserProfileView.as_view(), name='current-user-profile'),
 
     # ─── 8. ROUTER (Must be last to avoid overriding specific paths) ─
     path('', include(router.urls)),
