@@ -14,10 +14,12 @@ from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
+# ─── UPDATED IMPORTS ──────────────────────────────────────────────────
 from .models import (
     Note, SensorReading, Photo, StockMarketReading,
     Product, PaymentTransaction, SiteConfiguration,
-    Category, Location, SearchQuery, ProductClick
+    Category, Location, SearchQuery, ProductClick,
+    UserProfile  # Added UserProfile
 )
 from .serializers import (
     SensorReadingSerializer,
@@ -30,6 +32,7 @@ from .serializers import (
     LocationSerializer,
     SearchQuerySerializer,
     ProductClickSerializer,
+    UserProfileSerializer,  # Added UserProfileSerializer
 )
 
 # =====================================================================
@@ -130,13 +133,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         """
         Returns the min/max price of all products so the frontend
         slider scales automatically instead of being hardcoded.
-
-        Response:
-            {
-                "min_price": 0,
-                "max_price": 5000000,     # rounded ceiling for slider
-                "actual_max": 4750000.0   # actual highest product price
-            }
         """
         agg = Product.objects.aggregate(max_price=Max('price'))
         max_price = agg.get('max_price') or 0
@@ -144,10 +140,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         if max_price <= 0:
             ceiling = 5_000_000
         else:
-            # Round up to a clean magnitude:
-            #   4,750,000  ->  5,000,000
-            #   12,300,000 -> 20,000,000
-            #   87,000,000 -> 90,000,000
             magnitude = 10 ** (len(str(int(max_price))) - 1)
             ceiling = int((int(max_price) // magnitude + 1) * magnitude)
 
@@ -199,10 +191,6 @@ class PhotoViewSet(viewsets.ModelViewSet):
 # 🔍 SEARCH QUERY & PRODUCT CLICK TRACKING (ANALYTICS)
 # =====================================================================
 class SearchQueryCreateView(generics.CreateAPIView):
-    """
-    Records a search query along with device analytics.
-    Accepts: query (required), session_key (optional)
-    """
     queryset = SearchQuery.objects.all()
     serializer_class = SearchQuerySerializer
     permission_classes = [AllowAny]
@@ -222,10 +210,6 @@ class SearchQueryCreateView(generics.CreateAPIView):
 
 
 class ProductClickCreateView(generics.CreateAPIView):
-    """
-    Records a product click (detail view) with device analytics.
-    Accepts: product (id), search_query (optional), session_key (optional), is_detail_view (optional)
-    """
     queryset = ProductClick.objects.all()
     serializer_class = ProductClickSerializer
     permission_classes = [AllowAny]
@@ -257,7 +241,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         ).order_by('-created_at')
 
     def _get_pesapal_token(self, consumer_key, consumer_secret, base_url):
-        """Helper to fetch JWT Bearer Token from Pesapal API 3.0"""
         auth_url = f"{base_url}/api/Auth/RequestToken"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         payload = {
@@ -270,9 +253,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         return None
 
     def create(self, request, *args, **kwargs):
-        """
-        Initiate Pesapal Order Request (Supports Mobile Money & Cards via Pesapal iframe/redirect).
-        """
         payload = request.data
         product_id = payload.get('product')
         phone = payload.get('phone_number')
@@ -287,7 +267,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        # --- FEE FROM SITE CONFIGURATION ---
         try:
             config = SiteConfiguration.objects.first()
             fee = config.promotion_fee if config else 20000.00
@@ -308,21 +287,18 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             status='PENDING'
         )
 
-        # Determine Environment Base URL
         if settings.DEBUG:
             base_url = "https://cybqa.pesapal.com/pesapalv3"
             print(f"🧪 SANDBOX: Using Pesapal Demo Environment")
         else:
             base_url = "https://pay.pesapal.com/v3"
 
-        # 1. Get Authentication Token
         token = self._get_pesapal_token(consumer_key, consumer_secret, base_url)
         if not token:
             transaction.status = 'FAILED'
             transaction.save()
             return Response({"error": "Failed to authenticate with Pesapal API."}, status=502)
 
-        # 2. Prepare SubmitOrderRequest Payload
         order_url = f"{base_url}/api/Transactions/SubmitOrderRequest"
         headers = {
             "Authorization": f"Bearer {token}",
@@ -390,9 +366,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def pesapal_webhook(request):
-    """
-    Pesapal pings this URL when a payment changes state.
-    """
     order_tracking_id = request.GET.get('OrderTrackingId') or request.data.get('OrderTrackingId')
     merchant_reference = request.GET.get('OrderMerchantReference') or request.data.get('OrderMerchantReference')
 
@@ -469,6 +442,19 @@ class CreateUserView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
+
+
+# ─── NEW: Fetch the logged-in user's profile data ─────────────────────
+class CurrentUserProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = request.user.userprofile
+            serializer = UserProfileSerializer(profile)
+            return Response(serializer.data)
+        except UserProfile.DoesNotExist:
+            return Response({"error": "Profile not found"}, status=404)
 
 
 class ChartDataView2(APIView):
