@@ -1,117 +1,245 @@
-from django.db import models
-from django.contrib.auth.models import User
-from cloudinary.models import CloudinaryField
-
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from django.db import transaction  # ✅ ADDED for safe DB operations
 from rest_framework import serializers
-from .models import Note, SensorReading, Photo  # Import Photo model here, do not define it!
+from .models import (
+    Note, SensorReading, Photo, Product, PaymentTransaction,
+    Category, Location, SearchQuery, ProductClick,
+    StockMarketReading, SiteConfiguration, UserProfile
+)
+
+User = get_user_model()
+
+# =====================================================================
+# 🔐 1. USER & AUTHENTICATION SERIALIZERS
+# =====================================================================
+class UserProfileSerializer(serializers.ModelSerializer):
+    user = serializers.ReadOnlyField(source='user.username')
+
+    class Meta:
+        model = UserProfile
+        fields = ['id', 'user', 'phone_number', 'whatsapp_number']
 
 
-
-
-from rest_framework import serializers
-from .models import Product, Photo
-
-
-
-
-# Append to the very end of your local myapp/serializers.py file
-from .models import PaymentTransaction
-
-class PaymentTransactionSerializer(serializers.ModelSerializer):
-    # Returns the human-readable string version of the transaction choices
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+class UserSerializer(serializers.ModelSerializer):
+    # Accept profile fields in the same registration request
+    phone_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    whatsapp_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
     
-    # Returns the name of the product being promoted for clear UI receipts
+    # Require password confirmation
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    password2 = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "username", "email", "first_name", "last_name", 
+            "password", "password2", "phone_number", "whatsapp_number"
+        ]
+        extra_kwargs = {
+            'email': {'required': True},
+            'first_name': {'required': False},
+            'last_name': {'required': False},
+        }
+
+    def validate(self, attrs):
+        # 1. Check if passwords match
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError({"password": "Password fields didn't match."})
+        
+        # 2. Check if username exists
+        if User.objects.filter(username=attrs['username']).exists():
+            raise serializers.ValidationError({"username": "A user with that username already exists."})
+            
+        return attrs
+
+    def create(self, validated_data):
+        # Extract profile data
+        phone_number = validated_data.pop('phone_number', '')
+        whatsapp_number = validated_data.pop('whatsapp_number', '')
+        validated_data.pop('password2')
+        
+        try:
+            # ✅ Use transaction.atomic() so if the profile fails, the user creation is rolled back!
+            with transaction.atomic():
+                # Create User
+                user = User.objects.create_user(
+                    username=validated_data['username'],
+                    email=validated_data.get('email', ''),
+                    first_name=validated_data.get('first_name', ''),
+                    last_name=validated_data.get('last_name', ''),
+                    password=validated_data['password']
+                )
+                
+                # Safely create linked UserProfile
+                UserProfile.objects.create(
+                    user=user,
+                    phone_number=phone_number,
+                    whatsapp_number=whatsapp_number
+                )
+                
+                return user
+                
+        except Exception as e:
+            # If anything fails, raise a clean validation error to the frontend
+            raise serializers.ValidationError({"detail": f"Registration failed: {str(e)}"})
+
+
+# =====================================================================
+# 🏷️ 2. CATEGORY & LOCATION SERIALIZERS (READ-ONLY)
+# =====================================================================
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ['id', 'name', 'slug', 'description', 'is_active']
+
+
+class LocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Location
+        fields = ['id', 'name', 'code', 'is_active']
+
+
+# =====================================================================
+# 💳 3. PAYMENT TRANSACTION SERIALIZER (OPTIMIZED)
+# =====================================================================
+class PaymentTransactionSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     product_title = serializers.CharField(source='product.title', read_only=True)
 
     class Meta:
         model = PaymentTransaction
         fields = [
-            'id',
-            'product',
-            'product_title',
-            'amount',
-            'phone_number',
-            'tx_ref',
-            'transaction_id',
-            'status',
-            'status_display',
-            'created_at'
+            'id', 'product', 'product_title', 'amount', 'phone_number',
+            'tx_ref', 'transaction_id', 'status', 'status_display', 'created_at'
         ]
-        # Protect internal transaction parameters from being tampered with by the frontend
         read_only_fields = ['id', 'status', 'transaction_id', 'tx_ref', 'created_at']
 
+    @staticmethod
+    def optimize_queryset(queryset):
+        """Prefetches related product to avoid N+1 queries."""
+        return queryset.select_related('product')
 
+
+# =====================================================================
+# 📸 4. PHOTO SERIALIZER
+# =====================================================================
 class PhotoSerializer(serializers.ModelSerializer):
-    # Use a SerializerMethodField to ensure Cloudinary always outputs clean absolute URLs
     image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Photo
-        # Exclude the direct product relation field to avoid cluttering the frontend arrays
-        fields = ['id', 'image_url']
+        fields = ['id', 'image_url', 'product', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
     def get_image_url(self, obj):
         if obj.image:
-            # Safely extract the full 'https://cloudinary.com...' string
             try:
                 return obj.image.url
             except AttributeError:
-                # Fallback if it is stored as a raw string format in the database row
                 return str(obj.image)
         return None
 
+
+# =====================================================================
+# 🌾 5. PRODUCT SERIALIZER (FULLY OPTIMIZED)
+# =====================================================================
 class ProductSerializer(serializers.ModelSerializer):
-    # 'photos' matches the related_name='photos' string defined inside your Photo ForeignKey model
-    # read_only=True ensures image upload logic is handled on its own separate endpoint
+    # Seller fields
+    seller = serializers.ReadOnlyField(source='seller.id')
+    seller_username = serializers.ReadOnlyField(source='seller.username')
+    seller_email = serializers.ReadOnlyField(source='seller.email')
+
+    # Photos
     photos = PhotoSerializer(many=True, read_only=True)
-    
-    # Human-readable displays for choices fields on the React frontend
-    condition_display = serializers.CharField(source='get_condition_display', read_only=True)
-    item_location_display = serializers.CharField(source='get_item_location_display', read_only=True)
-    
-    # Display the seller's username instead of just a raw database integer number
-    seller_username = serializers.CharField(source='seller.username', read_only=True)
+
+    # Condition display
+    condition_display = serializers.ReadOnlyField(source='get_condition_display')
+
+    # Dynamic category & location fields
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_slug = serializers.CharField(source='category.slug', read_only=True)
+    location_name = serializers.CharField(source='location.name', read_only=True)
+    location_code = serializers.CharField(source='location.code', read_only=True)
+
+    # Custom fields
+    days_since_listing = serializers.SerializerMethodField()
+    bulk_delivery_estimate_ugx = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
-            'id', 
-            'seller', 
-            'seller_username',
-            'title', 
-            'description', 
-            'price', 
-            'condition', 
-            'condition_display', 
-            'stock_count', 
-            'item_location', 
-            'item_location_display', 
-            'seller_location_details', 
-            'photos', # Returns an array of nested photo objects
-            'created_at'
+            'id',
+            'seller', 'seller_username', 'seller_email',
+            'title', 'description',
+            'price',
+            'condition', 'condition_display',
+            'stock_count',
+            # Dynamic fields
+            'category', 'category_name', 'category_slug',
+            'location', 'location_name', 'location_code',
+            # Legacy fields
+            'seller_location_details',
+            'weight',
+            'contact_phone',
+            # Media & rankings
+            'photos',
+            'is_featured', 'featured_until',
+            'created_at',
+            'days_since_listing',
+            'bulk_delivery_estimate_ugx'
         ]
-        read_only_fields = ['id', 'seller', 'created_at']
+        read_only_fields = ['id', 'is_featured', 'featured_until', 'created_at']
+
+    def get_days_since_listing(self, obj):
+        delta = timezone.now() - obj.created_at
+        return max(0, delta.days)
+
+    def get_bulk_delivery_estimate_ugx(self, obj):
+        if not obj.weight:
+            return 7000
+        return int(5000 + (float(obj.weight) * 2500))
+
+    @staticmethod
+    def optimize_for_list(queryset):
+        return queryset.select_related(
+            'seller', 'category', 'location'
+        ).prefetch_related('photos')
+
+    @staticmethod
+    def optimize_for_detail(queryset):
+        return queryset.select_related(
+            'seller', 'category', 'location'
+        ).prefetch_related('photos')
 
 
-
-
-
-
-
-
-class UserSerializer(serializers.ModelSerializer):
+# =====================================================================
+# 🔍 6. SEARCH QUERY & PRODUCT CLICK SERIALIZERS (ANALYTICS)
+# =====================================================================
+class SearchQuerySerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
-        fields = ["id", "username", "password"]
-        extra_kwargs = {"password": {"write_only": True}}
-
-    def create(self, validated_data):
-        user = User.objects.create_user(**validated_data)
-        return user
+        model = SearchQuery
+        fields = ['id', 'query', 'session_key', 'user', 'ip_address',
+                  'device_type', 'browser', 'os', 'created_at']
+        read_only_fields = ['id', 'user', 'ip_address', 'device_type',
+                            'browser', 'os', 'created_at']
 
 
+class ProductClickSerializer(serializers.ModelSerializer):
+    product_title = serializers.ReadOnlyField(source='product.title')
+
+    class Meta:
+        model = ProductClick
+        fields = ['id', 'product', 'product_title', 'user', 'session_key',
+                  'search_query', 'ip_address', 'referer', 'device_type',
+                  'browser', 'os', 'is_detail_view', 'clicked_at']
+        read_only_fields = ['id', 'user', 'ip_address', 'referer',
+                            'device_type', 'browser', 'os', 'clicked_at']
+
+
+# =====================================================================
+# 📝 7. NOTE SERIALIZER
+# =====================================================================
 class NoteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Note
@@ -119,6 +247,9 @@ class NoteSerializer(serializers.ModelSerializer):
         extra_kwargs = {"author": {"read_only": True}}
 
 
+# =====================================================================
+# 📊 8. SENSOR & STOCK MARKET READING SERIALIZERS
+# =====================================================================
 class SensorReadingSerializer(serializers.ModelSerializer):
     x = serializers.DateTimeField(source='timestamp', format='%Y-%m-%d %H:%M:%S')
     y = serializers.FloatField(source='value')
@@ -128,4 +259,21 @@ class SensorReadingSerializer(serializers.ModelSerializer):
         fields = ['x', 'y']
 
 
+class StockMarketReadingSerializer(serializers.ModelSerializer):
+    x = serializers.DateTimeField(source='timestamp', format='%Y-%m-%d %H:%M:%S')
+    y1 = serializers.FloatField(source='value1')
+    y2 = serializers.FloatField(source='value2')
 
+    class Meta:
+        model = StockMarketReading
+        fields = ['x', 'y1', 'y2']
+
+
+# =====================================================================
+# ⚙️ 9. SITE CONFIGURATION SERIALIZER
+# =====================================================================
+class SiteConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SiteConfiguration
+        fields = ['id', 'promotion_fee', 'updated_at']
+        read_only_fields = ['id', 'updated_at']
