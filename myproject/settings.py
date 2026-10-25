@@ -148,7 +148,7 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': os.getenv("CLOUDINARY_API_SECRET"),
 }
 
-# ✅ FIXED: Use WhiteNoise for static, Cloudinary for media.
+# ✅ FIXED: WhiteNoise handles static files, Cloudinary handles media only.
 # Do NOT add STATICFILES_STORAGE here.
 STORAGES = {
     "default": {
