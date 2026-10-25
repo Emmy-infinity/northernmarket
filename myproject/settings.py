@@ -16,15 +16,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ─── SECURITY ────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
 
-# ✅ Default to True for Render testing (so you can see errors if Pesapal fails)
+# ✅ Default to True for Render testing (so you can see errors)
 DEBUG = os.getenv("DEBUG", "True") == "True" 
 
-# ✅ Allow your Render domain and localhost
 ALLOWED_HOSTS = [
     "localhost", 
     "127.0.0.1", 
     "django-ecommerce-backend-4u8q.onrender.com",
-    ".onrender.com" # Allows any render subdomain just in case
+    ".onrender.com"
 ]
 
 # ─── CORS & CSRF ────────────────────────────────────────────────────
@@ -42,8 +41,8 @@ CORS_ALLOW_HEADERS = [
 
 # ✅ CRITICAL: This allows Pesapal to POST to your webhook without being blocked by Django CSRF
 CSRF_TRUSTED_ORIGINS = [
-    "https://*.onrender.com",      # Wildcard for Render
-    "https://*.trycloudflare.com", # For local testing
+    "https://*.onrender.com",      
+    "https://*.trycloudflare.com", 
     "http://localhost:5173",
 ]
 
@@ -110,7 +109,6 @@ TEMPLATES = [
 WSGI_APPLICATION = "myproject.wsgi.application"
 
 # ─── DATABASE ──────────────────────────────────────────────────────
-# On Render, the DATABASE_URL environment variable is automatically injected by the database add-on.
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}",
@@ -150,6 +148,8 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': os.getenv("CLOUDINARY_API_SECRET"),
 }
 
+# ✅ FIXED: Use WhiteNoise for static, Cloudinary for media.
+# Do NOT add STATICFILES_STORAGE here.
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
