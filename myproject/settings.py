@@ -15,7 +15,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─── SECURITY ────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
-DEBUG = os.getenv("DEBUG", "False") == "True" # Defaults to False for Render safety
+
+# ✅ Default to True for Render testing (so you can see errors if Pesapal fails)
+DEBUG = os.getenv("DEBUG", "True") == "True" 
 
 # ✅ Allow your Render domain and localhost
 ALLOWED_HOSTS = [
@@ -40,8 +42,7 @@ CORS_ALLOW_HEADERS = [
 
 # ✅ CRITICAL: This allows Pesapal to POST to your webhook without being blocked by Django CSRF
 CSRF_TRUSTED_ORIGINS = [
-    "https://django-ecommerce-backend-4u8q.onrender.com",
-    "https://northernmarket-pwa.onrender.com",
+    "https://*.onrender.com",      # Wildcard for Render
     "https://*.trycloudflare.com", # For local testing
     "http://localhost:5173",
 ]
