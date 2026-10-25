@@ -1,68 +1,52 @@
 import os
-import sys
 from pathlib import Path
 from datetime import timedelta
 import dj_database_url
 from dotenv import load_dotenv
+
+# ─── CLOUDINARY ──────────────────────────────────────────────────────
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
 
-# ─── Unfold Admin Compatibility Patch ─────────────────────────────────
-from django.contrib.admin.templatetags import admin_list
-
-original_node_init = admin_list.InclusionAdminNode.__init__
-
-def tolerant_unfold_node_init(self, parser, token, *args, **kwargs):
-    try:
-        return original_node_init(self, parser, token, *args, **kwargs)
-    except TypeError:
-        return original_node_init(self, parser, *args, **kwargs)
-
-admin_list.InclusionAdminNode.__init__ = tolerant_unfold_node_init
-
-# ─── Load Environment ──────────────────────────────────────────────────
 load_dotenv()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ─── Security ────────────────────────────────────────────────────────
-# ✅ Fallback for local development – but set a real SECRET_KEY in production!
+# ─── SECURITY ────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
-DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,django-ecommerce-backend-4u8q.onrender.com").split(",")
+DEBUG = True
+ALLOWED_HOSTS = ["*"]  # Allows your cloudflare tunnel to hit the server
 
-# ─── CORS ──────────────────────────────────────────────────────────────
+# ─── CORS & CSRF ────────────────────────────────────────────────────
+CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove this in production!
+
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
     "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    os.getenv("FRONTEND_URL", "https://northernmarket-pwa.onrender.com"),
+    "http://localhost:3000",
+    "https://northernmarket-pwa.onrender.com",
 ]
+
 CORS_ALLOW_CREDENTIALS = True
-
-CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS + [
-    "https://django-ecommerce-backend-4u8q.onrender.com",
+CORS_ALLOW_HEADERS = [
+    "accept", "accept-encoding", "authorization",
+    "content-type", "dnt", "origin", "user-agent",
+    "x-csrftoken", "x-requested-with",
 ]
 
-# ─── Security Settings for Production ──────────────────────────────
-if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    CSRF_COOKIE_SECURE = True
-    SESSION_COOKIE_SECURE = True
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+# ✅ REQUIRED: Django will block POST requests from your tunnel without this.
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.trycloudflare.com", 
+    "https://*.ngrok-free.app",
+    "http://localhost:5173",
+    "https://northernmarket-pwa.onrender.com",
+]
 
-# ─── REST Framework ──────────────────────────────────────────────────
+# ─── REST FRAMEWORK ─────────────────────────────────────────────────
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
-    ],
 }
 
 SIMPLE_JWT = {
@@ -70,7 +54,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
 }
 
-# ─── Installed Apps ────────────────────────────────────────────────────
+# ─── INSTALLED APPS ──────────────────────────────────────────────────
 INSTALLED_APPS = [
     'unfold',
     'unfold.contrib.filters',
@@ -84,17 +68,13 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
-    'django_filters',
-    "myapp.apps.MyappConfig",
+    "myapp",
 ]
 
-# ─── Middleware (OPTIMIZED ORDER) ────────────────────────────────────
+# ─── MIDDLEWARE (ORDER IS CRITICAL) ──────────────────────────────────
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",  # ✅ Must be first
     "django.middleware.security.SecurityMiddleware",
-    # 🚀 OPTIMIZATION: GZip compresses responses (API JSON, HTML, CSS).
-    # This reduces bandwidth and speeds up page loads significantly.
-    "django.middleware.gzip.GZipMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -124,7 +104,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "myproject.wsgi.application"
 
-# ─── Database (OPTIMIZED) ────────────────────────────────────────────
+# ─── DATABASE ──────────────────────────────────────────────────────
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}",
@@ -132,12 +112,6 @@ DATABASES = {
     )
 }
 
-# 🚀 OPTIMIZATION: If using PostgreSQL, add a connect_timeout to fail fast
-# instead of hanging for minutes if the database is unreachable.
-if DATABASES['default']['ENGINE'] == 'django.db.backends.postgresql':
-    DATABASES['default'].setdefault('OPTIONS', {})['connect_timeout'] = 10
-
-# ─── Password Validation ──────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -145,41 +119,18 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# ─── Internationalization ──────────────────────────────────────────
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# ─── Static & Media ────────────────────────────────────────────────
+# ─── STATIC & MEDIA ────────────────────────────────────────────────
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ─── CRITICAL FIX: Define STATICFILES_STORAGE ──────────────────────
-# This prevents Cloudinary's custom collectstatic from raising an
-# AttributeError because it looks for this setting.
-STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
-
-# ─── STORAGES (Django 4.2+) ─────────────────────────────────────────
-STORAGES = {
-    "default": {
-        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-    },
-}
-
-# ─── WhiteNoise (serves static files in production) ──────────────────
-WHITENOISE_USE_FINDERS = True
-WHITENOISE_AUTOREFRESH = DEBUG
-# 🚀 OPTIMIZATION: Cache static files for 1 year in production.
-# This drastically reduces bandwidth and speeds up repeat page loads.
-WHITENOISE_MAX_AGE = 31536000 if not DEBUG else 0
-
-# ─── Cloudinary ────────────────────────────────────────────────────
+# ─── CLOUDINARY ──────────────────────────────────────────────────────
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0"),
     api_key=os.getenv("CLOUDINARY_API_KEY", "387833656525477"),
@@ -193,49 +144,21 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': os.getenv("CLOUDINARY_API_SECRET", "AmTSvrVHKiLlN2ArzFgctGx_-70"),
 }
 
-# ─── Flutterwave ──────────────────────────────────────────────────
-FLW_SECRET_KEY = os.getenv("FLUTTERWAVE_SECRET_KEY")
-FLW_SECRET_HASH = os.getenv("FLUTTERWAVE_WEBHOOK_SECRET_HASH")
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
-BASE_URL = os.getenv("BASE_URL", "https://django-ecommerce-backend-4u8q.onrender.com")
+# ─── PESAPAL SANDBOX CONFIGURATION ──────────────────────────────────
+PESAPAL_CONSUMER_KEY = os.getenv("PESAPAL_CONSUMER_KEY")
+PESAPAL_CONSUMER_SECRET = os.getenv("PESAPAL_CONSUMER_SECRET")
+PESAPAL_IPN_ID = os.getenv("PESAPAL_IPN_ID")
+PESAPAL_IPN_URL = os.getenv("PESAPAL_IPN_URL")
+PESAPAL_CALLBACK_URL = os.getenv("PESAPAL_CALLBACK_URL", "http://localhost:5173/tokens")
+PESAPAL_ENV = os.getenv("PESAPAL_ENV", "sandbox")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# 🚀 OPTIMIZATION: In-memory caching reduces database hits for repeated queries
-# (e.g., SiteConfiguration, Categories, Locations).
-# In production, consider replacing with Redis for distributed caching.
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake',
-    }
-}
-
-# ─── Logging ──────────────────────────────────────────────────────
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-        },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO' if not DEBUG else 'DEBUG',
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console'],
-            'level': 'INFO' if not DEBUG else 'DEBUG',
-            'propagate': False,
-        },
-        # 🚀 OPTIMIZATION: Suppress noisy database query logs in production.
-        # Set to 'DEBUG' during development if you need to inspect SQL.
-        'django.db.backends': {
-            'handlers': ['console'],
-            'level': 'WARNING' if not DEBUG else 'INFO',
-            'propagate': False,
-        },
-    },
-}
