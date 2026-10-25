@@ -15,18 +15,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─── SECURITY ────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
-DEBUG = True
-ALLOWED_HOSTS = ["*"]  # Allows your cloudflare tunnel to hit the server
+DEBUG = os.getenv("DEBUG", "False") == "True" # Defaults to False for Render safety
+
+# ✅ Allow your Render domain and localhost
+ALLOWED_HOSTS = [
+    "localhost", 
+    "127.0.0.1", 
+    "django-ecommerce-backend-4u8q.onrender.com",
+    ".onrender.com" # Allows any render subdomain just in case
+]
 
 # ─── CORS & CSRF ────────────────────────────────────────────────────
-CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove this in production!
-
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://northernmarket-pwa.onrender.com",
 ]
-
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     "accept", "accept-encoding", "authorization",
@@ -34,12 +38,12 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken", "x-requested-with",
 ]
 
-# ✅ REQUIRED: Django will block POST requests from your tunnel without this.
+# ✅ CRITICAL: This allows Pesapal to POST to your webhook without being blocked by Django CSRF
 CSRF_TRUSTED_ORIGINS = [
-    "https://*.trycloudflare.com", 
-    "https://*.ngrok-free.app",
-    "http://localhost:5173",
+    "https://django-ecommerce-backend-4u8q.onrender.com",
     "https://northernmarket-pwa.onrender.com",
+    "https://*.trycloudflare.com", # For local testing
+    "http://localhost:5173",
 ]
 
 # ─── REST FRAMEWORK ─────────────────────────────────────────────────
@@ -105,6 +109,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "myproject.wsgi.application"
 
 # ─── DATABASE ──────────────────────────────────────────────────────
+# On Render, the DATABASE_URL environment variable is automatically injected by the database add-on.
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{os.path.join(BASE_DIR, 'db.sqlite3')}",
@@ -132,16 +137,16 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # ─── CLOUDINARY ──────────────────────────────────────────────────────
 cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0"),
-    api_key=os.getenv("CLOUDINARY_API_KEY", "387833656525477"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET", "AmTSvrVHKiLlN2ArzFgctGx_-70"),
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
     secure=True
 )
 
 CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0"),
-    'API_KEY': os.getenv("CLOUDINARY_API_KEY", "387833656525477"),
-    'API_SECRET': os.getenv("CLOUDINARY_API_SECRET", "AmTSvrVHKiLlN2ArzFgctGx_-70"),
+    'CLOUD_NAME': os.getenv("CLOUDINARY_CLOUD_NAME"),
+    'API_KEY': os.getenv("CLOUDINARY_API_KEY"),
+    'API_SECRET': os.getenv("CLOUDINARY_API_SECRET"),
 }
 
 STORAGES = {
@@ -153,12 +158,12 @@ STORAGES = {
     },
 }
 
-# ─── PESAPAL SANDBOX CONFIGURATION ──────────────────────────────────
+# ─── PESAPAL SANDBOX / PRODUCTION CONFIGURATION ─────────────────────
 PESAPAL_CONSUMER_KEY = os.getenv("PESAPAL_CONSUMER_KEY")
 PESAPAL_CONSUMER_SECRET = os.getenv("PESAPAL_CONSUMER_SECRET")
 PESAPAL_IPN_ID = os.getenv("PESAPAL_IPN_ID")
 PESAPAL_IPN_URL = os.getenv("PESAPAL_IPN_URL")
-PESAPAL_CALLBACK_URL = os.getenv("PESAPAL_CALLBACK_URL", "http://localhost:5173/tokens")
+PESAPAL_CALLBACK_URL = os.getenv("PESAPAL_CALLBACK_URL", "https://northernmarket-pwa.onrender.com/tokens")
 PESAPAL_ENV = os.getenv("PESAPAL_ENV", "sandbox")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
