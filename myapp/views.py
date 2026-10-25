@@ -1,8 +1,8 @@
 import uuid
 import requests
-import json
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.core.cache import cache  # ✅ ADDED for token caching
 from django.db.models import Max
 from rest_framework import generics, viewsets, permissions, status
 from rest_framework.views import APIView
@@ -42,7 +42,6 @@ def parse_user_agent(user_agent_str):
     """Simple parser to extract device type, browser, and OS from User-Agent string."""
     ua = user_agent_str.lower()
 
-    # Device type
     if 'mobile' in ua or 'android' in ua or 'iphone' in ua:
         device = 'Mobile'
     elif 'tablet' in ua or 'ipad' in ua:
@@ -50,7 +49,6 @@ def parse_user_agent(user_agent_str):
     else:
         device = 'Desktop'
 
-    # Browser
     if 'edg/' in ua:
         browser = 'Edge'
     elif 'chrome' in ua and 'chromium' in ua:
@@ -64,7 +62,6 @@ def parse_user_agent(user_agent_str):
     else:
         browser = 'Other'
 
-    # OS
     if 'windows' in ua:
         os = 'Windows'
     elif 'android' in ua:
@@ -225,7 +222,7 @@ class ProductClickCreateView(generics.CreateAPIView):
 
 
 # =====================================================================
-# 💳 PESAPAL PAYMENT TRANSACTION VIEWSET (FIXED FOR PRODUCTION)
+# 💳 PESAPAL PAYMENT TRANSACTION VIEWSET (ROBUST & CACHED)
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
@@ -236,15 +233,35 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         ).order_by('-created_at')
 
     def _get_pesapal_token(self, consumer_key, consumer_secret, base_url):
+        """
+        Fetches a Pesapal token, but caches it to avoid hitting the API
+        on every single request. Tokens are valid for 5 minutes.
+        """
+        cache_key = f"pesapal_token_{base_url}"
+        cached_token = cache.get(cache_key)
+        
+        if cached_token:
+            return cached_token
+
         auth_url = f"{base_url}/api/Auth/RequestToken"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         payload = {
             "consumer_key": consumer_key,
             "consumer_secret": consumer_secret
         }
-        response = requests.post(auth_url, json=payload, headers=headers, timeout=30)
-        if response.status_code == 200:
-            return response.json().get("token")
+        
+        try:
+            response = requests.post(auth_url, json=payload, headers=headers, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get("token")
+                # ✅ Cache the token for 4 minutes (240 seconds) to be safe
+                if token:
+                    cache.set(cache_key, token, timeout=240)
+                return token
+        except Exception as e:
+            print(f"Token fetch failed: {e}")
+            
         return None
 
     def create(self, request, *args, **kwargs):
@@ -256,7 +273,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
         ipn_id = getattr(settings, 'PESAPAL_IPN_ID', None)
         
-        # ✅ Use the React callback URL from settings
         callback_url = getattr(settings, 'PESAPAL_CALLBACK_URL', 'https://northernmarket-pwa.onrender.com/tokens')
 
         if not consumer_key or not consumer_secret:
@@ -285,7 +301,6 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             status='PENDING'
         )
 
-        # ✅ Determine environment based on PESAPAL_ENV
         if getattr(settings, 'PESAPAL_ENV', 'sandbox') == "sandbox":
             base_url = "https://cybqa.pesapal.com/pesapalv3"
             print(f"🧪 SANDBOX: Using Pesapal Demo Environment")
@@ -360,7 +375,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 📡 PESAPAL IPN WEBHOOK (FIXED RESPONSE)
+# 📡 PESAPAL IPN WEBHOOK (ROBUST)
 # =====================================================================
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
@@ -374,7 +389,6 @@ def pesapal_webhook(request):
     consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
     consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
     
-    # ✅ Determine environment based on PESAPAL_ENV, not DEBUG
     if getattr(settings, 'PESAPAL_ENV', 'sandbox') == "sandbox":
         base_url = "https://cybqa.pesapal.com/pesapalv3"
     else:
@@ -386,26 +400,31 @@ def pesapal_webhook(request):
     if token:
         status_url = f"{base_url}/api/Transactions/GetTransactionStatus?orderTrackingId={order_tracking_id}"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        status_resp = requests.get(status_url, headers=headers, timeout=30)
+        try:
+            status_resp = requests.get(status_url, headers=headers, timeout=30)
 
-        if status_resp.status_code == 200:
-            status_data = status_resp.json()
-            payment_status = status_data.get('payment_status_description')
+            if status_resp.status_code == 200:
+                status_data = status_resp.json()
+                payment_status = status_data.get('payment_status_description')
 
-            try:
-                tx = PaymentTransaction.objects.get(tx_ref=merchant_reference)
-                if payment_status == "Completed":
-                    tx.status = 'SUCCESSFUL'
-                    tx.save()
-                    tx.product.is_featured = True
-                    tx.product.save()
-                    print(f"✅ Pesapal Transaction {merchant_reference} marked successful.")
-                elif payment_status == "Failed":
-                    tx.status = 'FAILED'
-                    tx.save()
-                    print(f"❌ Pesapal Transaction {merchant_reference} failed.")
-            except PaymentTransaction.DoesNotExist:
-                print(f"⚠️ Transaction reference {merchant_reference} not found in database.")
+                try:
+                    tx = PaymentTransaction.objects.get(tx_ref=merchant_reference)
+                    # ✅ Idempotency check: Don't process if already successful
+                    if tx.status != 'SUCCESSFUL':
+                        if payment_status == "Completed":
+                            tx.status = 'SUCCESSFUL'
+                            tx.save()
+                            tx.product.is_featured = True
+                            tx.product.save()
+                            print(f"✅ Pesapal Transaction {merchant_reference} marked successful.")
+                        elif payment_status == "Failed":
+                            tx.status = 'FAILED'
+                            tx.save()
+                            print(f"❌ Pesapal Transaction {merchant_reference} failed.")
+                except PaymentTransaction.DoesNotExist:
+                    print(f"⚠️ Transaction reference {merchant_reference} not found in database.")
+        except requests.exceptions.RequestException as e:
+            print(f"Webhook status check failed: {e}")
 
     # ✅ CRITICAL: Return the exact JSON Pesapal expects
     return Response({
