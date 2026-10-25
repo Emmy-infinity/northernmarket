@@ -1,3 +1,4 @@
+import sys
 from django.db import models
 from django.contrib.auth import get_user_model
 from cloudinary.models import CloudinaryField
@@ -12,6 +13,7 @@ User = get_user_model()
 # 🌟 USER PROFILE INFRASTRUCTURE
 # =====================================================================
 class UserProfile(models.Model):
+    # ✅ on_delete=models.CASCADE ensures if a User is deleted, their Profile is too!
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     phone_number = models.CharField(max_length=15, blank=True, help_text="Primary business phone number")
     whatsapp_number = models.CharField(max_length=15, blank=True, help_text="For direct quick-chats")
@@ -21,7 +23,9 @@ class UserProfile(models.Model):
 
 @receiver(post_save, sender=User)
 def create_or_update_user_profile(sender, instance, created, **kwargs):
-    UserProfile.objects.get_or_create(user=instance)
+    if created:
+        # ✅ get_or_create prevents IntegrityError if the serializer already made it
+        UserProfile.objects.get_or_create(user=instance)
 
 
 # =====================================================================
@@ -78,25 +82,17 @@ class Product(models.Model):
     description = models.TextField()
 
     # Financials & Inventory
-    price = models.DecimalField(max_digits=12, decimal_places=2,blank=True, db_index=True)
+    price = models.DecimalField(max_digits=12, decimal_places=2, blank=True, db_index=True)
     condition = models.CharField(max_length=10, choices=CONDITION_CHOICES, default='USED', db_index=True)
     stock_count = models.PositiveIntegerField(default=1)
 
-    # Dynamic Category & Location
+    # Dynamic Category & Location (Kept from your advanced setup)
     category = models.ForeignKey(
-        Category,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='products',
+        Category, on_delete=models.SET_NULL, null=True, blank=True, related_name='products',
         help_text="Select a product category"
     )
     location = models.ForeignKey(
-        Location,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='products',
+        Location, on_delete=models.SET_NULL, null=True, blank=True, related_name='products',
         help_text="Where the item is located"
     )
 
@@ -115,7 +111,6 @@ class Product(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            # 🚀 OPTIMIZATION: Composite indexes for the most common e-commerce queries.
             models.Index(fields=['is_featured', 'featured_until'], name='prod_feat_until_idx'),
             models.Index(fields=['category', 'price'], name='prod_cat_price_idx'),
             models.Index(fields=['location', '-created_at'], name='prod_loc_created_idx'),
@@ -150,18 +145,14 @@ class PaymentTransaction(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     phone_number = models.CharField(max_length=15)
-    tx_ref = models.CharField(max_length=100, unique=True)  # Unique automatically creates an index
+    tx_ref = models.CharField(max_length=100, unique=True)  
     transaction_id = models.CharField(max_length=100, blank=True, null=True)
-    
-    # ✅ FIXED: Added db_index=True to status (you query this constantly)
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING', db_index=True)
-    
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            # 🚀 OPTIMIZATION: Fetch pending transactions quickly (e.g., for retry logic)
             models.Index(fields=['status', 'created_at'], name='pay_stat_created_idx'),
         ]
 
@@ -170,18 +161,15 @@ class PaymentTransaction(models.Model):
 
 
 # =====================================================================
-# 🔍 SEARCH & CLICK ANALYTICS (NEW)
+# 🔍 SEARCH & CLICK ANALYTICS
 # =====================================================================
 class SearchQuery(models.Model):
-    """
-    Records every search performed on the platform, including device and browser info.
-    """
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='search_queries')
     session_key = models.CharField(max_length=40, null=True, blank=True, db_index=True, help_text="For anonymous users")
     query = models.CharField(max_length=255, db_index=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True, help_text="Raw User-Agent string")
-    device_type = models.CharField(max_length=20, blank=True, db_index=True)  # Mobile, Tablet, Desktop
+    device_type = models.CharField(max_length=20, blank=True, db_index=True)  
     browser = models.CharField(max_length=50, blank=True, db_index=True)
     os = models.CharField(max_length=50, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -196,20 +184,17 @@ class SearchQuery(models.Model):
 
 
 class ProductClick(models.Model):
-    """
-    Tracks product clicks (especially detail views) with device analytics.
-    """
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='clicks')
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='product_clicks')
-    session_key = models.CharField(max_length=40, null=True, blank=True, db_index=True, help_text="For anonymous users")
-    search_query = models.CharField(max_length=255, null=True, blank=True, db_index=True, help_text="Search query that led to this click")
+    session_key = models.CharField(max_length=40, null=True, blank=True, db_index=True)
+    search_query = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
-    referer = models.URLField(max_length=500, null=True, blank=True, help_text="Page URL where the click occurred")
-    user_agent = models.TextField(blank=True, help_text="Raw User-Agent string")
+    referer = models.URLField(max_length=500, null=True, blank=True)
+    user_agent = models.TextField(blank=True)
     device_type = models.CharField(max_length=20, blank=True, db_index=True)
     browser = models.CharField(max_length=50, blank=True, db_index=True)
     os = models.CharField(max_length=50, blank=True, db_index=True)
-    is_detail_view = models.BooleanField(default=True, help_text="True if this click opened the product detail page")
+    is_detail_view = models.BooleanField(default=True)
     clicked_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -260,10 +245,8 @@ class StockMarketReading(models.Model):
 # =====================================================================
 class SiteConfiguration(models.Model):
     promotion_fee = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=20000.00,
-        help_text="Default fee for promoting a product (UGX). This is used for all products."
+        max_digits=10, decimal_places=2, default=20000.00,
+        help_text="Default fee for promoting a product (UGX)."
     )
     updated_at = models.DateTimeField(auto_now=True)
 
