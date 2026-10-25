@@ -14,12 +14,12 @@ from rest_framework.filters import SearchFilter
 from django_filters.rest_framework import DjangoFilterBackend
 import django_filters
 
-# ─── UPDATED IMPORTS ──────────────────────────────────────────────────
+# ─── IMPORTS ──────────────────────────────────────────────────────────
 from .models import (
     Note, SensorReading, Photo, StockMarketReading,
     Product, PaymentTransaction, SiteConfiguration,
     Category, Location, SearchQuery, ProductClick,
-    UserProfile  # Added UserProfile
+    UserProfile
 )
 from .serializers import (
     SensorReadingSerializer,
@@ -32,7 +32,7 @@ from .serializers import (
     LocationSerializer,
     SearchQuerySerializer,
     ProductClickSerializer,
-    UserProfileSerializer,  # Added UserProfileSerializer
+    UserProfileSerializer,
 )
 
 # =====================================================================
@@ -106,7 +106,7 @@ class ProductFilter(django_filters.FilterSet):
 
 
 # =====================================================================
-# 📦 PRODUCT VIEWSET — with dynamic price-bounds action
+# 📦 PRODUCT VIEWSET
 # =====================================================================
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
@@ -127,13 +127,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         for image_file in uploaded_images:
             Photo.objects.create(product=product_instance, image=image_file)
 
-    # ─── Dynamic price bounds for the frontend slider ────────────
     @action(detail=False, methods=['get'], url_path='price-bounds', permission_classes=[AllowAny])
     def price_bounds(self, request):
-        """
-        Returns the min/max price of all products so the frontend
-        slider scales automatically instead of being hardcoded.
-        """
         agg = Product.objects.aggregate(max_price=Max('price'))
         max_price = agg.get('max_price') or 0
 
@@ -230,7 +225,7 @@ class ProductClickCreateView(generics.CreateAPIView):
 
 
 # =====================================================================
-# 💳 PESAPAL PAYMENT TRANSACTION VIEWSET
+# 💳 PESAPAL PAYMENT TRANSACTION VIEWSET (FIXED FOR PRODUCTION)
 # =====================================================================
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentTransactionSerializer
@@ -260,6 +255,9 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
         consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
         consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
         ipn_id = getattr(settings, 'PESAPAL_IPN_ID', None)
+        
+        # ✅ Use the React callback URL from settings
+        callback_url = getattr(settings, 'PESAPAL_CALLBACK_URL', 'https://northernmarket-pwa.onrender.com/tokens')
 
         if not consumer_key or not consumer_secret:
             return Response(
@@ -287,7 +285,8 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             status='PENDING'
         )
 
-        if settings.DEBUG:
+        # ✅ Determine environment based on PESAPAL_ENV
+        if getattr(settings, 'PESAPAL_ENV', 'sandbox') == "sandbox":
             base_url = "https://cybqa.pesapal.com/pesapalv3"
             print(f"🧪 SANDBOX: Using Pesapal Demo Environment")
         else:
@@ -311,7 +310,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             "currency": "UGX",
             "amount": float(fee),
             "description": f"Promotion fee for product: {product.title[:50]}",
-            "callback_url": f"{settings.BASE_URL}/payment-callback/",
+            "callback_url": callback_url,
             "notification_id": ipn_id,
             "billing_address": {
                 "email_address": request.user.email or "client@example.com",
@@ -361,7 +360,7 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
 
 
 # =====================================================================
-# 📡 PESAPAL IPN WEBHOOK
+# 📡 PESAPAL IPN WEBHOOK (FIXED RESPONSE)
 # =====================================================================
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
@@ -374,7 +373,12 @@ def pesapal_webhook(request):
 
     consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', None)
     consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', None)
-    base_url = "https://cybqa.pesapal.com/pesapalv3" if settings.DEBUG else "https://pay.pesapal.com/v3"
+    
+    # ✅ Determine environment based on PESAPAL_ENV, not DEBUG
+    if getattr(settings, 'PESAPAL_ENV', 'sandbox') == "sandbox":
+        base_url = "https://cybqa.pesapal.com/pesapalv3"
+    else:
+        base_url = "https://pay.pesapal.com/v3"
 
     temp_vs = PaymentTransactionViewSet()
     token = temp_vs._get_pesapal_token(consumer_key, consumer_secret, base_url)
@@ -403,7 +407,13 @@ def pesapal_webhook(request):
             except PaymentTransaction.DoesNotExist:
                 print(f"⚠️ Transaction reference {merchant_reference} not found in database.")
 
-    return Response({"status": "acknowledged"}, status=200)
+    # ✅ CRITICAL: Return the exact JSON Pesapal expects
+    return Response({
+        "orderNotificationType": "IPNCHANGE",
+        "orderTrackingId": order_tracking_id,
+        "orderMerchantReference": merchant_reference,
+        "status": 200
+    }, status=200)
 
 
 # =====================================================================
@@ -444,7 +454,6 @@ class CreateUserView(generics.CreateAPIView):
     permission_classes = [AllowAny]
 
 
-# ─── NEW: Fetch the logged-in user's profile data ─────────────────────
 class CurrentUserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
