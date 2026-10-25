@@ -16,7 +16,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ─── SECURITY ────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
 
-# ✅ Default to True for Render testing (so you can see errors)
 DEBUG = os.getenv("DEBUG", "True") == "True" 
 
 ALLOWED_HOSTS = [
@@ -39,7 +38,6 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken", "x-requested-with",
 ]
 
-# ✅ CRITICAL: This allows Pesapal to POST to your webhook without being blocked by Django CSRF
 CSRF_TRUSTED_ORIGINS = [
     "https://*.onrender.com",      
     "https://*.trycloudflare.com", 
@@ -75,9 +73,9 @@ INSTALLED_APPS = [
     "myapp",
 ]
 
-# ─── MIDDLEWARE (ORDER IS CRITICAL) ──────────────────────────────────
+# ─── MIDDLEWARE ──────────────────────────────────────────────────────
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # ✅ Must be first
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -128,9 +126,10 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# ─── STATIC & MEDIA ────────────────────────────────────────────────
+# ─── STATIC & MEDIA (CLEANED UP) ───────────────────────────────────
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
@@ -148,8 +147,6 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': os.getenv("CLOUDINARY_API_SECRET"),
 }
 
-# ✅ FIXED: WhiteNoise handles static files, Cloudinary handles media only.
-# Do NOT add STATICFILES_STORAGE here.
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
@@ -159,21 +156,7 @@ STORAGES = {
     },
 }
 
-# ─── STATIC & MEDIA ────────────────────────────────────────────────
-STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / 'staticfiles'
-
-# ✅ CRITICAL: Tell Django where your source static files are
-STATICFILES_DIRS = [
-    BASE_DIR / 'static',  # If you have a project-level static folder
-]
-
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
-
-
-
-# ─── PESAPAL SANDBOX / PRODUCTION CONFIGURATION ─────────────────────
+# ─── PESAPAL CONFIGURATION ──────────────────────────────────────────
 PESAPAL_CONSUMER_KEY = os.getenv("PESAPAL_CONSUMER_KEY")
 PESAPAL_CONSUMER_SECRET = os.getenv("PESAPAL_CONSUMER_SECRET")
 PESAPAL_IPN_ID = os.getenv("PESAPAL_IPN_ID")
