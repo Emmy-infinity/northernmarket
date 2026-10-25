@@ -12,22 +12,69 @@ User = get_user_model()
 # =====================================================================
 # 🔐 1. USER & AUTHENTICATION SERIALIZERS
 # =====================================================================
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ["id", "username", "password"]
-        extra_kwargs = {"password": {"write_only": True}}
-
-    def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
-
-
 class UserProfileSerializer(serializers.ModelSerializer):
     user = serializers.ReadOnlyField(source='user.username')
 
     class Meta:
         model = UserProfile
         fields = ['id', 'user', 'phone_number', 'whatsapp_number']
+
+
+class UserSerializer(serializers.ModelSerializer):
+    # Accept profile fields in the same registration request
+    phone_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    whatsapp_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    
+    # Require password confirmation
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    password2 = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+
+    class Meta:
+        model = User
+        fields = [
+            "id", "username", "email", "first_name", "last_name", 
+            "password", "password2", "phone_number", "whatsapp_number"
+        ]
+        extra_kwargs = {
+            'email': {'required': True},
+            'first_name': {'required': False},
+            'last_name': {'required': False},
+        }
+
+    def validate(self, attrs):
+        # Check if passwords match
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError({"password": "Password fields didn't match."})
+        
+        # Check if username exists
+        if User.objects.filter(username=attrs['username']).exists():
+            raise serializers.ValidationError({"username": "A user with that username already exists."})
+            
+        return attrs
+
+    def create(self, validated_data):
+        # Extract profile data
+        phone_number = validated_data.pop('phone_number', '')
+        whatsapp_number = validated_data.pop('whatsapp_number', '')
+        validated_data.pop('password2')
+        
+        # Create User
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data.get('email', ''),
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', ''),
+            password=validated_data['password']
+        )
+        
+        # Create linked UserProfile
+        UserProfile.objects.create(
+            user=user,
+            phone_number=phone_number,
+            whatsapp_number=whatsapp_number
+        )
+        
+        return user
 
 
 # =====================================================================
