@@ -16,11 +16,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ─── SECURITY ────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key-change-me")
 DEBUG = True
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ["*"]  # Allows your cloudflare tunnel to hit the server
 
-# ─── CORS ───────────────────────────────────────────────────────────
-# ✅ For debugging, you can temporarily allow all origins
-CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove this after testing
+# ─── CORS & CSRF ────────────────────────────────────────────────────
+CORS_ALLOW_ALL_ORIGINS = True  # ⚠️ Remove this in production!
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -35,12 +34,19 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken", "x-requested-with",
 ]
 
+# ✅ REQUIRED: Django will block POST requests from your tunnel without this.
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.trycloudflare.com", 
+    "https://*.ngrok-free.app",
+    "http://localhost:5173",
+    "https://northernmarket-pwa.onrender.com",
+]
+
 # ─── REST FRAMEWORK ─────────────────────────────────────────────────
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    # Remove global permission to allow public endpoints
 }
 
 SIMPLE_JWT = {
@@ -60,13 +66,14 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "corsheaders",  # ✅ Must be included
+    "corsheaders",
     "rest_framework",
     "myapp",
 ]
 
+# ─── MIDDLEWARE (ORDER IS CRITICAL) ──────────────────────────────────
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # ✅ First
+    "corsheaders.middleware.CorsMiddleware",  # ✅ Must be first
     "django.middleware.security.SecurityMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -145,5 +152,13 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+# ─── PESAPAL SANDBOX CONFIGURATION ──────────────────────────────────
+PESAPAL_CONSUMER_KEY = os.getenv("PESAPAL_CONSUMER_KEY")
+PESAPAL_CONSUMER_SECRET = os.getenv("PESAPAL_CONSUMER_SECRET")
+PESAPAL_IPN_ID = os.getenv("PESAPAL_IPN_ID")
+PESAPAL_IPN_URL = os.getenv("PESAPAL_IPN_URL")
+PESAPAL_CALLBACK_URL = os.getenv("PESAPAL_CALLBACK_URL", "http://localhost:5173/tokens")
+PESAPAL_ENV = os.getenv("PESAPAL_ENV", "sandbox")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
