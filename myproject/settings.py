@@ -159,6 +159,20 @@ STORAGES = {
     },
 }
 
+# ─── STATIC & MEDIA ────────────────────────────────────────────────
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# ✅ CRITICAL: Tell Django where your source static files are
+STATICFILES_DIRS = [
+    BASE_DIR / 'static',  # If you have a project-level static folder
+]
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+
+
 # ─── PESAPAL SANDBOX / PRODUCTION CONFIGURATION ─────────────────────
 PESAPAL_CONSUMER_KEY = os.getenv("PESAPAL_CONSUMER_KEY")
 PESAPAL_CONSUMER_SECRET = os.getenv("PESAPAL_CONSUMER_SECRET")
