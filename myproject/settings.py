@@ -60,7 +60,7 @@ SIMPLE_JWT = {
 INSTALLED_APPS = [
     'unfold',
     'unfold.contrib.filters',
-    # 'cloudinary_storage',  # ❌ REMOVED: Causes collectstatic crash on Django 5.1
+    # 'cloudinary_storage',  # ❌ REMOVED to fix collectstatic crash
     "django.contrib.admin",
     'cloudinary',
     "django.contrib.auth",
@@ -133,16 +133,20 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ─── CLOUDINARY ──────────────────────────────────────────────────────
+# ─── CLOUDINARY CONFIGURATION ──────────────────────────────────────
+# ✅ Explicitly load these from env for the serializer
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+
 cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
-    api_key=os.getenv("CLOUDINARY_API_KEY"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET,
     secure=True
 )
 
-# ─── STORAGES (Django 4.2+) ─────────────────────────────────────────
-# ✅ Cloudinary handles media, WhiteNoise handles static files.
+# ✅ STORAGES still points to the Cloudinary storage backend for media
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
