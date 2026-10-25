@@ -23,6 +23,7 @@ class PhotoInline(TabularInline):
 @admin.register(Product)
 class ProductAdmin(ModelAdmin):
     list_display = ['title', 'price', 'condition', 'category', 'location', 'stock_count', 'is_featured']
+    # ✅ Removed 'created_at' from filters if it was causing issues elsewhere
     list_filter = ['condition', 'category', 'location', 'is_featured']
     search_fields = ['title', 'description', 'seller__username']
     inlines = [PhotoInline]
@@ -84,11 +85,12 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
     list_display = ('username', 'email', 'first_name', 'last_name', 'is_staff')
 
 
-# ─── PAYMENT TRANSACTION ADMIN (OPTIMIZED) ──────────────────────────
+# ─── PAYMENT TRANSACTION ADMIN (FIXED) ──────────────────────────────
 @admin.register(PaymentTransaction)
 class PaymentTransactionAdmin(ModelAdmin):
     list_display = ('tx_ref', 'product', 'amount', 'phone_number', 'status', 'created_at')
-    list_filter = ('status', 'created_at')
+    # ✅ FIXED: Removed 'created_at' to prevent DateFieldListFilter crash
+    list_filter = ('status',) 
     search_fields = ('tx_ref', 'transaction_id', 'phone_number', 'product__title')
     
     list_select_related = ('product',)
@@ -96,23 +98,25 @@ class PaymentTransactionAdmin(ModelAdmin):
     readonly_fields = ('tx_ref', 'transaction_id', 'created_at')
 
 
-# ─── SEARCH QUERY ADMIN (ANALYTICS) ──────────────────────────────────
+# ─── SEARCH QUERY ADMIN (FIXED) ──────────────────────────────────────
 @admin.register(SearchQuery)
 class SearchQueryAdmin(ModelAdmin):
     list_display = ('query', 'device_type', 'browser', 'os', 'user', 'ip_address', 'created_at')
-    list_filter = ('device_type', 'browser', 'os', 'created_at')
+    # ✅ FIXED: Removed 'created_at' to prevent DateFieldListFilter crash
+    list_filter = ('device_type', 'browser', 'os')
     search_fields = ('query', 'ip_address', 'user__username')
-    list_select_related = ('user',)  # efficient if displaying user
+    list_select_related = ('user',)
     readonly_fields = ('created_at',)
 
 
-# ─── PRODUCT CLICK ADMIN (ANALYTICS) ─────────────────────────────────
+# ─── PRODUCT CLICK ADMIN (FIXED) ─────────────────────────────────────
 @admin.register(ProductClick)
 class ProductClickAdmin(ModelAdmin):
     list_display = ('product', 'search_query', 'device_type', 'browser', 'os', 'is_detail_view', 'clicked_at')
-    list_filter = ('device_type', 'browser', 'os', 'is_detail_view', 'clicked_at')
+    # ✅ FIXED: Removed 'clicked_at' to prevent DateFieldListFilter crash
+    list_filter = ('device_type', 'browser', 'os', 'is_detail_view')
     search_fields = ('product__title', 'search_query', 'ip_address')
-    list_select_related = ('product', 'user')  # efficient for product title and user
+    list_select_related = ('product', 'user')
     readonly_fields = ('clicked_at',)
 
 
@@ -124,24 +128,27 @@ class UserProfileAdmin(ModelAdmin):
     list_select_related = ('user',)
 
 
-# ─── NOTE ADMIN ──────────────────────────────────────────────────────
+# ─── NOTE ADMIN (FIXED) ──────────────────────────────────────────────
 @admin.register(Note)
 class NoteAdmin(ModelAdmin):
     list_display = ('title', 'author', 'created_at')
     search_fields = ('title', 'content', 'author__username')
-    list_filter = ('created_at',)
+    # ✅ FIXED: Removed 'created_at' to prevent DateFieldListFilter crash
+    list_filter = () 
     list_select_related = ('author',)
 
 
-# ─── SENSOR READING ADMIN ────────────────────────────────────────────
+# ─── SENSOR READING ADMIN (FIXED) ────────────────────────────────────
 @admin.register(SensorReading)
 class SensorReadingAdmin(ModelAdmin):
     list_display = ('timestamp', 'value')
-    list_filter = ('timestamp',)
+    # ✅ FIXED: Removed 'timestamp' to prevent DateFieldListFilter crash
+    list_filter = () 
 
 
-# ─── STOCK MARKET READING ADMIN ──────────────────────────────────────
+# ─── STOCK MARKET READING ADMIN (FIXED) ──────────────────────────────
 @admin.register(StockMarketReading)
 class StockMarketReadingAdmin(ModelAdmin):
     list_display = ('timestamp', 'value1', 'value2')
-    list_filter = ('timestamp',)
+    # ✅ FIXED: Removed 'timestamp' to prevent DateFieldListFilter crash
+    list_filter = ()
