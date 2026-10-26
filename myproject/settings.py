@@ -133,11 +133,11 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# ─── CLOUDINARY CONFIGURATION ──────────────────────────────────────
-# ✅ Explicitly load these from env for the serializer
-CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
-CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
-CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+# ─── CLOUDINARY CONFIGURATION (CRITICAL FIX) ───────────────────────
+# ✅ Use fallback values from your .env just in case Render misses them
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "dtll1o9u0")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "387833656525477")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "AmTSvrVHKiLlN2ArzFgctGx_-70")
 
 cloudinary.config(
     cloud_name=CLOUDINARY_CLOUD_NAME,
@@ -146,7 +146,7 @@ cloudinary.config(
     secure=True
 )
 
-# ✅ STORAGES still points to the Cloudinary storage backend for media
+# ✅ Tell Django to use Cloudinary for media
 STORAGES = {
     "default": {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
